@@ -43,9 +43,81 @@ paths:
   /quests:
     get:
       summary: Browse public quests
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
       responses:
         "200":
-          description: Public quest summaries
+          description: Public quests ordered by publish time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Quest"
+    post:
+      summary: Create an authenticated user's draft quest
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQuest"
+      responses:
+        "201":
+          description: Draft created
+        "401":
+          description: Missing, invalid, or expired access token
+        "422":
+          description: Quest fields violate product rules
+  /quests/{questId}:
+    get:
+      summary: Get a public quest
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Public quest details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quest"
+        "404":
+          description: Quest is missing or not public
+  /quests/{questId}/publish:
+    post:
+      summary: Publish a free quest or move a reward quest to awaiting funding
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Updated quest
+        "403":
+          description: The authenticated user is not the creator
+        "409":
+          description: Quest cannot transition from its current state
+        "422":
+          description: Deadline has elapsed
+  /quests/{questId}/join:
+    post:
+      summary: Join an open quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "201":
+          description: Membership created
+        "409":
+          description: Quest is closed, already joined, or owned by the user
   /quests/validate:
     post:
       summary: Validate immutable quest participation rules
@@ -61,12 +133,133 @@ paths:
         "422":
           description: Rules violate product limits
 components:
+  parameters:
+    QuestId:
+      in: path
+      name: questId
+      required: true
+      schema:
+        type: string
+        format: uuid
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    CreateQuest:
+      type: object
+      required:
+        - title
+        - description
+        - quest_type
+        - max_entries
+        - winner_count
+        - winner_selection_method
+        - proof_requirements
+        - reward_enabled
+        - deadline
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 100
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        cover_media_url:
+          type: [string, "null"]
+        quest_type:
+          type: string
+          enum: [FRIENDS, BOUNTY, EXPLORE]
+        visibility:
+          type: string
+          enum: [PUBLIC, PRIVATE, INVITE_ONLY]
+          default: PUBLIC
+        is_group_challenge:
+          type: boolean
+          default: false
+        required_group_size:
+          type: [integer, "null"]
+          minimum: 2
+          maximum: 50
+        max_entries:
+          type: integer
+          minimum: 1
+          maximum: 10
+        winner_count:
+          type: integer
+          minimum: 1
+          maximum: 3
+        winner_selection_method:
+          type: string
+          enum: [FIRST_VALID, BEST_SUBMISSION]
+        proof_requirements:
+          type: array
+          minItems: 1
+          maxItems: 6
+          uniqueItems: true
+          items:
+            type: string
+            enum: [PHOTO, VIDEO, LINK, TEXT, QR_CHECKPOINT, LOCATION]
+        judging_criteria:
+          type: [string, "null"]
+          maxLength: 500
+        reward_enabled:
+          type: boolean
+        reward_amount_minor:
+          type: [integer, "null"]
+          minimum: 1
+        reward_currency:
+          type: [string, "null"]
+          enum: [USD, null]
+        settlement_asset:
+          type: [string, "null"]
+          enum: [NIM, USDT, null]
+        deadline:
+          type: string
+          format: date-time
+    Quest:
+      allOf:
+        - $ref: "#/components/schemas/CreateQuest"
+        - type: object
+          required:
+            - id
+            - creator_id
+            - creator_username
+            - creator_display_name
+            - visibility
+            - status
+            - entries_received
+            - participants_joined
+            - created_at
+          properties:
+            id:
+              type: string
+              format: uuid
+            creator_id:
+              type: string
+              format: uuid
+            creator_username:
+              type: string
+            creator_display_name:
+              type: string
+            creator_avatar_url:
+              type: [string, "null"]
+            status:
+              type: string
+              enum: [DRAFT, AWAITING_FUNDING, OPEN, CLOSED_FOR_REVIEW, REVIEWING, FINALIZED, CANCELLED, SUSPENDED]
+            entries_received:
+              type: integer
+            participants_joined:
+              type: integer
+            created_at:
+              type: string
+              format: date-time
+            published_at:
+              type: [string, "null"]
+              format: date-time
     QuestRules:
       type: object
       required: [max_entries, winner_count, winner_selection_method]

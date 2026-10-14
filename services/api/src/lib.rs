@@ -41,6 +41,10 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(profiles::update_me)
             .service(profiles::get_profile)
             .service(quests::list_quests)
+            .service(quests::get_quest)
+            .service(quests::create_quest)
+            .service(quests::publish_quest)
+            .service(quests::join_quest)
             .service(quests::validate_quest),
     );
 }
