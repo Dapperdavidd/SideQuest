@@ -30,6 +30,7 @@ docs                     Architecture and product engineering notes
 ```bash
 pnpm install
 cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
 docker compose -f infrastructure/docker-compose.yml up -d
 ```
 
@@ -63,7 +64,7 @@ flutter test apps/mobile
 
 ## Configuration
 
-Copy `.env.example` and provide a Supabase project URL and publishable key to activate email, Google, and Apple authentication. Provider dashboards must include the local and production callback URLs. Apple activation additionally requires Apple Developer identifiers and signing credentials.
+Copy the root `.env.example` for the API and `apps/web/.env.example` to `apps/web/.env.local` for the Next.js client. Provide a Supabase project URL and publishable key to activate email, Google, and Apple authentication. Provider dashboards must include the local and production callback URLs. Apple activation additionally requires Apple Developer identifiers and signing credentials.
 
 Wallet access is optional. The web app remains usable in a normal browser and detects Nimiq Pay at runtime before requesting wallet capabilities.
 
