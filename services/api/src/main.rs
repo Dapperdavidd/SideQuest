@@ -2,7 +2,8 @@ use std::io;
 
 use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware::Logger, web};
-use api::{AppState, configure_routes};
+use api::{AppState, auth::AuthVerifier, configure_routes};
+use sqlx::postgres::PgPoolOptions;
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
@@ -19,12 +20,33 @@ async fn main() -> io::Result<()> {
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(8080);
+    let database_url = std::env::var("DATABASE_URL").map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "DATABASE_URL must be configured",
+        )
+    })?;
+    let jwks_url = std::env::var("SUPABASE_JWKS_URL").map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "SUPABASE_JWKS_URL must be configured",
+        )
+    })?;
+    let database = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
+        .await
+        .map_err(io::Error::other)?;
+    let state = AppState {
+        database,
+        auth: AuthVerifier::new(jwks_url),
+    };
 
     tracing::info!(%host, %port, "starting SideQuest API");
 
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(AppState))
+            .app_data(web::Data::new(state.clone()))
             .wrap(Logger::default())
             .wrap(Cors::permissive())
             .configure(configure_routes)

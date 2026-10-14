@@ -5,6 +5,41 @@ info:
 servers:
   - url: http://localhost:8080/api/v1
 paths:
+  /users/me:
+    get:
+      summary: Get the authenticated user's profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The authenticated profile
+        "401":
+          description: Missing, invalid, or expired access token
+    patch:
+      summary: Update the authenticated user's profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The updated profile
+        "409":
+          description: Username is already taken
+        "422":
+          description: Profile fields are invalid
+  /users/{username}:
+    get:
+      summary: Get a public profile by username
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public profile
+        "404":
+          description: Profile not found
   /quests:
     get:
       summary: Browse public quests
@@ -26,6 +61,11 @@ paths:
         "422":
           description: Rules violate product limits
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     QuestRules:
       type: object

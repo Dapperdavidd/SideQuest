@@ -1,14 +1,22 @@
+pub mod auth;
 pub mod entries;
 pub mod payments;
+pub mod profiles;
 pub mod quests;
 pub mod reviews;
 
 use actix_web::{HttpResponse, Responder, get, web};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use sqlx::PgPool;
 
-#[derive(Clone, Default)]
-pub struct AppState;
+use crate::auth::AuthVerifier;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub database: PgPool,
+    pub auth: AuthVerifier,
+}
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -29,6 +37,9 @@ async fn health() -> impl Responder {
 pub fn configure_routes(config: &mut web::ServiceConfig) {
     config.service(health).service(
         web::scope("/api/v1")
+            .service(profiles::get_me)
+            .service(profiles::update_me)
+            .service(profiles::get_profile)
             .service(quests::list_quests)
             .service(quests::validate_quest),
     );
