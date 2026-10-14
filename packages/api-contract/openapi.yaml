@@ -40,6 +40,16 @@ paths:
           description: Public profile
         "404":
           description: Profile not found
+  /users/me/quests:
+    get:
+      summary: List quests created or joined by the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Related quests ordered by latest creation or publishing activity
+        "401":
+          description: Missing, invalid, or expired access token
   /quests:
     get:
       summary: Browse public quests

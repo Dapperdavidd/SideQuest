@@ -135,6 +135,23 @@ pub struct JoinResult {
     participants_joined: i64,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+pub struct MyQuestSummary {
+    id: Uuid,
+    title: String,
+    quest_type: String,
+    status: String,
+    relationship: String,
+    deadline: DateTime<Utc>,
+    entries_received: i64,
+    max_entries: i16,
+    participants_joined: i64,
+    reward_enabled: bool,
+    reward_amount_minor: Option<i64>,
+    reward_currency: Option<String>,
+    published_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Error)]
 pub enum QuestError {
     #[error(transparent)]
@@ -312,6 +329,49 @@ pub async fn get_quest(
 ) -> Result<web::Json<Quest>, QuestError> {
     let quest = find_public_quest(&state, quest_id.into_inner()).await?;
     Ok(web::Json(quest))
+}
+
+#[get("/users/me/quests")]
+pub async fn list_my_quests(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<Vec<MyQuestSummary>>, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quests = sqlx::query_as::<_, MyQuestSummary>(
+        r#"
+        with related_quests as (
+          select q.id, 'CREATOR'::text as relationship
+          from public.quests q
+          where q.creator_id = $1
+          union all
+          select p.quest_id as id, 'PARTICIPANT'::text as relationship
+          from public.quest_participants p
+          where p.user_id = $1
+        )
+        select q.id,
+               q.title,
+               q.quest_type::text as quest_type,
+               q.status::text as status,
+               related.relationship,
+               q.deadline,
+               (select count(*) from public.quest_entries e where e.quest_id = q.id) as entries_received,
+               q.max_entries,
+               (select count(*) from public.quest_participants p where p.quest_id = q.id) as participants_joined,
+               q.reward_enabled,
+               q.reward_amount_minor,
+               q.reward_currency::text as reward_currency,
+               q.published_at
+        from related_quests related
+        join public.quests q on q.id = related.id
+        order by coalesce(q.published_at, q.created_at) desc
+        "#,
+    )
+    .bind(user.id)
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?;
+
+    Ok(web::Json(quests))
 }
 
 #[post("/quests")]

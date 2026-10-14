@@ -45,7 +45,7 @@ async function DiscoverExperience() {
           <Logo inverse />
           <nav className="mt-12 space-y-2" aria-label="App navigation">
             <Link className="flex items-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-dark" href="/discover"><Compass size={19} />Discover</Link>
-            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="/discover"><Trophy size={19} />Quests</Link>
+            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/quests" : "/auth?next=/quests"}><Trophy size={19} />Quests</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/create" : "/auth?next=/create"}><Plus size={19} />Create</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/profile" : "/auth"}><UserRound size={19} />{viewer ? "Profile" : "Sign in"}</Link>
           </nav>

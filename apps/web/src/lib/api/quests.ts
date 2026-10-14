@@ -46,6 +46,22 @@ export type CreatorEntry = {
   evidence: { proof_type: string; value: string }[];
 };
 
+export type MyQuestSummary = {
+  id: string;
+  title: string;
+  quest_type: "FRIENDS" | "BOUNTY" | "EXPLORE";
+  status: string;
+  relationship: "CREATOR" | "PARTICIPANT";
+  deadline: string;
+  entries_received: number;
+  max_entries: number;
+  participants_joined: number;
+  reward_enabled: boolean;
+  reward_amount_minor: number | null;
+  reward_currency: string | null;
+  published_at: string | null;
+};
+
 export function apiUrl(path: string) {
   const base = process.env.NEXT_PUBLIC_API_URL;
   if (!base) throw new Error("NEXT_PUBLIC_API_URL is not configured.");
@@ -65,6 +81,15 @@ export async function getQuest(id: string): Promise<Quest | null> {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Unable to load this quest right now.");
   return response.json() as Promise<Quest>;
+}
+
+export async function getMyQuests(accessToken: string): Promise<MyQuestSummary[]> {
+  const response = await fetch(apiUrl("/users/me/quests"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load your quests right now.");
+  return response.json() as Promise<MyQuestSummary[]>;
 }
 
 export async function readApiError(response: Response, fallback: string) {
