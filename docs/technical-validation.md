@@ -21,3 +21,7 @@
 ## Release constraint
 
 The iOS product remains full-featured during development. App Store behavior will be adjusted only in response to confirmed policy analysis or actual review feedback; restricted functionality will not be hidden from review.
+
+## Mobile callback
+
+The Flutter clients register `app.sidequest://login-callback/` for Supabase email and OAuth redirects. Add this exact URL to the Supabase redirect allow list. Android declares Internet access in its production manifest; iOS and Android both route the callback to the singleTop Flutter activity/application.
