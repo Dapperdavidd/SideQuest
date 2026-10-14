@@ -45,7 +45,8 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(quests::create_quest)
             .service(quests::publish_quest)
             .service(quests::join_quest)
-            .service(quests::validate_quest),
+            .service(quests::validate_quest)
+            .service(entries::submit_entry),
     );
 }
 

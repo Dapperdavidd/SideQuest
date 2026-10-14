@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, LoaderCircle } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiUrl, readApiError } from "@/lib/api/quests";
 import { createClient } from "@/lib/supabase/client";
@@ -52,6 +53,7 @@ export function JoinButton({ questId, isCreator, isOpen }: JoinButtonProps) {
         {loading ? "Joining…" : label}
       </button>
       {error ? <p role="alert" className="mt-3 rounded-xl bg-[#fff0ed] px-4 py-3 text-sm text-[#8f2e1e]">{error}</p> : null}
+      {!isCreator && isOpen ? <Link href={`/quests/${questId}/submit`} className="mt-3 block text-center text-sm font-bold underline decoration-accent decoration-2 underline-offset-4">Already joined? Submit your entry</Link> : null}
       <p className="mt-3 text-center text-xs text-muted">Joining records your interest. Only an accepted submission uses an entry slot.</p>
     </div>
   );

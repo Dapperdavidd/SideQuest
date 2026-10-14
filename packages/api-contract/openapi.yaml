@@ -118,6 +118,26 @@ paths:
           description: Membership created
         "409":
           description: Quest is closed, already joined, or owned by the user
+  /quests/{questId}/entries:
+    post:
+      summary: Submit one immutable official entry with all required proof
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitEntry"
+      responses:
+        "201":
+          description: Entry and evidence accepted with a trusted timestamp
+        "409":
+          description: Membership, deadline, capacity, duplicate, or quest status prevents acceptance
+        "422":
+          description: Caption or evidence is invalid
   /quests/validate:
     post:
       summary: Validate immutable quest participation rules
@@ -260,6 +280,29 @@ components:
             published_at:
               type: [string, "null"]
               format: date-time
+    SubmitEntry:
+      type: object
+      required: [evidence]
+      properties:
+        caption:
+          type: [string, "null"]
+          maxLength: 280
+        evidence:
+          type: array
+          minItems: 1
+          maxItems: 6
+          uniqueItems: true
+          items:
+            type: object
+            required: [proof_type, value]
+            properties:
+              proof_type:
+                type: string
+                enum: [PHOTO, VIDEO, LINK, TEXT, QR_CHECKPOINT, LOCATION]
+              value:
+                type: string
+                minLength: 1
+                maxLength: 2048
     QuestRules:
       type: object
       required: [max_entries, winner_count, winner_selection_method]
