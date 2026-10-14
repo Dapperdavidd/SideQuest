@@ -28,6 +28,8 @@ The entry repository locks the quest row before it reads the accepted-entry coun
 
 Winner selection is a separate domain operation from review validity. First Valid accepts only reviewed entries, sorts them by trusted server submission time with entry ID as a deterministic tie-breaker, and chooses the published number. Best Submission accepts an explicit creator selection but rejects invalid entries, duplicate positions, and an incorrect number of winners. If fewer valid entries exist than published winner positions, all valid entries may win; if none are valid, the result contains no winners.
 
+Payment intent state is monotonic: Created can become Pending or Expired; Pending can become Confirmed, Failed, or Expired. A funded quest can open only from Confirmed. Reward allocations are unique per winning entry, and payouts are unique per allocation and idempotency key. Provider references and transaction hashes are unique where present, preventing duplicate reconciliation from producing duplicate payouts.
+
 ## Nimiq Mini App integration
 
 The web app works without wallet access. Inside Nimiq Pay it feature-detects the host and initializes `@nimiq/mini-app-sdk`. NIM operations use the native provider. USDT uses the injected EVM provider on an explicitly supported chain. All sensitive wallet operations remain user-confirmed in Nimiq Pay.

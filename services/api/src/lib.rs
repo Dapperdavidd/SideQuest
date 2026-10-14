@@ -1,4 +1,5 @@
 pub mod entries;
+pub mod payments;
 pub mod quests;
 pub mod reviews;
 
