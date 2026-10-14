@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
-import { Inter, Sora } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
 import "./globals.css";
-
-const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
-const sora = Sora({ variable: "--font-sora", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
@@ -16,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" data-scroll-behavior="smooth" className={`${inter.variable} ${sora.variable} h-full antialiased`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${GeistSans.variable} h-full antialiased`}>
       <body className="min-h-full">{children}</body>
     </html>
   );

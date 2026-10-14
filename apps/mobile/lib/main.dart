@@ -37,7 +37,7 @@ class SideQuestApp extends ConsumerWidget {
           seedColor: accent,
           brightness: Brightness.light,
         ),
-        fontFamily: 'Avenir Next',
+        fontFamily: 'Geist',
         textTheme: const TextTheme(
           headlineLarge: TextStyle(fontWeight: FontWeight.w700, color: ink),
           headlineMedium: TextStyle(fontWeight: FontWeight.w700, color: ink),
