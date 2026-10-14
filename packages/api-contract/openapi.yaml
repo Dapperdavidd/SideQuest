@@ -1,0 +1,44 @@
+openapi: 3.1.0
+info:
+  title: SideQuest API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080/api/v1
+paths:
+  /quests:
+    get:
+      summary: Browse public quests
+      responses:
+        "200":
+          description: Public quest summaries
+  /quests/validate:
+    post:
+      summary: Validate immutable quest participation rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestRules"
+      responses:
+        "204":
+          description: Rules are valid
+        "422":
+          description: Rules violate product limits
+components:
+  schemas:
+    QuestRules:
+      type: object
+      required: [max_entries, winner_count, winner_selection_method]
+      properties:
+        max_entries:
+          type: integer
+          minimum: 1
+          maximum: 10
+        winner_count:
+          type: integer
+          minimum: 1
+          maximum: 3
+        winner_selection_method:
+          type: string
+          enum: [FIRST_VALID, BEST_SUBMISSION]

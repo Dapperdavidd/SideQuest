@@ -1,0 +1,12 @@
+{
+  "name": "sidequest",
+  "private": true,
+  "packageManager": "pnpm@11.4.0",
+  "scripts": {
+    "dev:web": "pnpm --dir apps/web dev",
+    "build:web": "pnpm --dir apps/web build",
+    "lint:web": "pnpm --dir apps/web lint",
+    "test:api": "cargo test --manifest-path services/api/Cargo.toml",
+    "test:mobile": "flutter test apps/mobile"
+  }
+}

@@ -1,0 +1,27 @@
+# Dependencies and build outputs
+node_modules/
+.next/
+dist/
+coverage/
+target/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.key
+
+# IDE and operating system files
+.DS_Store
+.idea/
+.vscode/
+
+# Local development history (intentionally not committed)
+.project-journal/
+
