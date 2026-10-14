@@ -1,5 +1,6 @@
 pub mod entries;
 pub mod quests;
+pub mod reviews;
 
 use actix_web::{HttpResponse, Responder, get, web};
 use chrono::{DateTime, Utc};

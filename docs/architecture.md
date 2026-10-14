@@ -26,6 +26,8 @@ Clients never decide whether an entry slot remains, whether a deadline has passe
 
 The entry repository locks the quest row before it reads the accepted-entry count, validates status and deadline against server time, inserts the official entry, and closes the quest in the same transaction when capacity is reached. The database uniqueness constraint prevents one participant from submitting twice. Accepted entries cannot be deleted by authenticated clients, so invalid review results do not silently reopen slots.
 
+Winner selection is a separate domain operation from review validity. First Valid accepts only reviewed entries, sorts them by trusted server submission time with entry ID as a deterministic tie-breaker, and chooses the published number. Best Submission accepts an explicit creator selection but rejects invalid entries, duplicate positions, and an incorrect number of winners. If fewer valid entries exist than published winner positions, all valid entries may win; if none are valid, the result contains no winners.
+
 ## Nimiq Mini App integration
 
 The web app works without wallet access. Inside Nimiq Pay it feature-detects the host and initializes `@nimiq/mini-app-sdk`. NIM operations use the native provider. USDT uses the injected EVM provider on an explicitly supported chain. All sensitive wallet operations remain user-confirmed in Nimiq Pay.
