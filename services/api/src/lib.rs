@@ -1,3 +1,4 @@
+pub mod entries;
 pub mod quests;
 
 use actix_web::{HttpResponse, Responder, get, web};

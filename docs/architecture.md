@@ -24,6 +24,8 @@ Clients never decide whether an entry slot remains, whether a deadline has passe
 - Published selection rules are immutable.
 - Funding and payouts have provider references and idempotency keys. Provider confirmation is required before a successful state is recorded.
 
+The entry repository locks the quest row before it reads the accepted-entry count, validates status and deadline against server time, inserts the official entry, and closes the quest in the same transaction when capacity is reached. The database uniqueness constraint prevents one participant from submitting twice. Accepted entries cannot be deleted by authenticated clients, so invalid review results do not silently reopen slots.
+
 ## Nimiq Mini App integration
 
 The web app works without wallet access. Inside Nimiq Pay it feature-detects the host and initializes `@nimiq/mini-app-sdk`. NIM operations use the native provider. USDT uses the injected EVM provider on an explicitly supported chain. All sensitive wallet operations remain user-confirmed in Nimiq Pay.
