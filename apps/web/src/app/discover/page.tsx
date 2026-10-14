@@ -18,7 +18,7 @@ export default function DiscoverPage() {
           <nav className="mt-12 space-y-2" aria-label="App navigation">
             <Link className="flex items-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-dark" href="/discover"><Compass size={19} />Discover</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="#"><Trophy size={19} />Quests</Link>
-            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="#"><Plus size={19} />Create</Link>
+            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="/create"><Plus size={19} />Create</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="#"><UserRound size={19} />Profile</Link>
           </nav>
           <div className="mt-auto rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="flex items-center gap-2 text-xs font-bold text-accent"><Sparkles size={14} /> MINI APP READY</div><p className="mt-2 text-xs leading-5 text-white/50">Connect Nimiq Pay only when you are ready to fund or receive a reward.</p></div>
@@ -32,7 +32,7 @@ export default function DiscoverPage() {
           </header>
           <div className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="min-w-0 px-5 py-7 sm:px-8">
-              <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-white/45">Good morning, Hannah</p><h1 className="mt-1 font-display text-3xl font-bold tracking-tight">What will you do today?</h1></div><button className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">Create a quest</button></div>
+              <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-white/45">Good morning, Hannah</p><h1 className="mt-1 font-display text-3xl font-bold tracking-tight">What will you do today?</h1></div><Link href="/create" className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">Create a quest</Link></div>
               <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{["All", "Friends", "Bounties", "Explore", "Nearby"].map((filter, index) => <button key={filter} className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${index === 0 ? "bg-accent text-dark" : "border border-white/10 text-white/60"}`}>{filter}</button>)}</div>
               <article className="photo-sunset mt-5 min-h-[310px] rounded-[1.35rem] bg-cover bg-center p-6 sm:p-8"><div className="flex min-h-[250px] max-w-xl flex-col justify-end"><span className="w-fit rounded-full bg-[#9167ff] px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider">Featured explore</span><h2 className="mt-3 font-display text-3xl font-bold">City sunset challenge</h2><p className="mt-2 text-sm text-white/70">Capture the best sunset spot in your city before the light disappears.</p><div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-semibold"><span>$20 reward</span><span>3/5 entries</span><span>1 winner</span><span>6 days left</span></div></div></article>
               <div className="mt-8 flex items-center justify-between"><h2 className="font-display text-xl font-bold">Trending quests</h2><button className="text-sm text-white/50">See all →</button></div>
