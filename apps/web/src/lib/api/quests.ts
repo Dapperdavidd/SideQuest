@@ -33,6 +33,19 @@ export type ApiErrorBody = {
   message?: string;
 };
 
+export type CreatorEntry = {
+  id: string;
+  participant_id: string;
+  participant_username: string;
+  participant_display_name: string;
+  participant_avatar_url: string | null;
+  caption: string | null;
+  submitted_at: string;
+  review_is_valid: boolean | null;
+  review_reason: string | null;
+  evidence: { proof_type: string; value: string }[];
+};
+
 export function apiUrl(path: string) {
   const base = process.env.NEXT_PUBLIC_API_URL;
   if (!base) throw new Error("NEXT_PUBLIC_API_URL is not configured.");

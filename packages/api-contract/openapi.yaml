@@ -119,6 +119,17 @@ paths:
         "409":
           description: Quest is closed, already joined, or owned by the user
   /quests/{questId}/entries:
+    get:
+      summary: List submissions and evidence for the quest creator
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Ordered official entries with review state and evidence
+        "403":
+          description: The authenticated user is not the quest creator
     post:
       summary: Submit one immutable official entry with all required proof
       security:
@@ -138,6 +149,65 @@ paths:
           description: Membership, deadline, capacity, duplicate, or quest status prevents acceptance
         "422":
           description: Caption or evidence is invalid
+  /quests/{questId}/entries/{entryId}/review:
+    post:
+      summary: Mark an official entry valid or invalid
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+        - in: path
+          name: entryId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_valid]
+              properties:
+                is_valid:
+                  type: boolean
+                reason:
+                  type: [string, "null"]
+                  maxLength: 500
+      responses:
+        "204":
+          description: Review decision saved
+        "409":
+          description: Quest is not ready for review
+  /quests/{questId}/finalize:
+    post:
+      summary: Lock winner selection and finalize a fully reviewed quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                winner_entry_ids:
+                  type: array
+                  maxItems: 3
+                  uniqueItems: true
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Final winner positions and finalized status
+        "409":
+          description: Entries remain unreviewed or quest is not reviewable
+        "422":
+          description: Winner selection violates the published method or count
   /quests/validate:
     post:
       summary: Validate immutable quest participation rules
