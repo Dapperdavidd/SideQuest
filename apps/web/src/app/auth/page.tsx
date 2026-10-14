@@ -13,13 +13,18 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const configured = isSupabaseConfigured();
 
+  function destination() {
+    const requested = new URLSearchParams(window.location.search).get("next");
+    return requested?.startsWith("/") && !requested.startsWith("//") ? requested : "/discover";
+  }
+
   async function signInWithProvider(provider: "google" | "apple") {
     if (!configured) return setMessage("Add the Supabase project credentials to enable sign-in.");
     setLoading(true);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=/discover` },
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination())}` },
     });
     if (error) {
       setMessage(error.message);
@@ -33,7 +38,7 @@ export default function AuthPage() {
     setLoading(true);
     const { error } = await createClient().auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/discover` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination())}` },
     });
     setLoading(false);
     setMessage(error?.message ?? "Check your inbox for your secure sign-in link.");

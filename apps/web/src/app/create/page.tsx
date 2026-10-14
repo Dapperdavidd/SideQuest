@@ -2,8 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Check, ImagePlus, MapPin, UsersRound, WalletCards, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, UsersRound, WalletCards, X } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { apiUrl, readApiError, type Quest } from "@/lib/api/quests";
+import { createClient } from "@/lib/supabase/client";
 
 type QuestType = "Friends" | "Bounty" | "Explore";
 type SelectionMethod = "First valid" | "Best submission";
@@ -11,30 +14,95 @@ type SelectionMethod = "First valid" | "Best submission";
 const stepNames = ["Quest", "People", "Proof", "Winners", "Reward", "Review"];
 
 export default function CreateQuestPage() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [deadlineValid, setDeadlineValid] = useState(false);
   const [questType, setQuestType] = useState<QuestType>("Friends");
   const [isGroup, setIsGroup] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
   const [maxEntries, setMaxEntries] = useState(5);
   const [proof, setProof] = useState<string[]>(["Photo"]);
   const [selectionMethod, setSelectionMethod] = useState<SelectionMethod>("First valid");
+  const [judgingCriteria, setJudgingCriteria] = useState("");
   const [winners, setWinners] = useState(1);
   const [rewardEnabled, setRewardEnabled] = useState(false);
   const [rewardAmount, setRewardAmount] = useState(10);
-  const [ready, setReady] = useState(false);
+  const [settlementAsset, setSettlementAsset] = useState<"NIM" | "USDT">("NIM");
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishedQuest, setPublishedQuest] = useState<Quest | null>(null);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
+  const detailsValid = title.trim().length >= 3 && Boolean(description.trim()) && deadlineValid;
 
   function toggleProof(value: string) {
     setProof((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
   }
 
-  function next() {
-    if (step === 0 && (!title.trim() || !description.trim())) return;
+  async function next() {
+    if (step === 0 && !detailsValid) return;
     if (step < 5) setStep((value) => value + 1);
-    else setReady(true);
+    else await publishQuest();
+  }
+
+  async function publishQuest() {
+    setPublishing(true);
+    setPublishError(null);
+
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth?next=/create");
+        return;
+      }
+
+      const createdResponse = await fetch(apiUrl("/quests"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim(),
+          cover_media_url: null,
+          quest_type: questType.toUpperCase(),
+          visibility: "PUBLIC",
+          is_group_challenge: isGroup,
+          required_group_size: isGroup ? groupSize : null,
+          max_entries: maxEntries,
+          winner_count: winners,
+          winner_selection_method: selectionMethod === "First valid" ? "FIRST_VALID" : "BEST_SUBMISSION",
+          proof_requirements: proof.map((value) => value.toUpperCase().replace(" ", "_")),
+          judging_criteria: selectionMethod === "Best submission" ? judgingCriteria.trim() : null,
+          reward_enabled: rewardEnabled,
+          reward_amount_minor: rewardEnabled ? Math.round(rewardAmount * 100) : null,
+          reward_currency: rewardEnabled ? "USD" : null,
+          settlement_asset: rewardEnabled ? settlementAsset : null,
+          deadline: new Date(deadline).toISOString(),
+        }),
+      });
+      if (!createdResponse.ok) throw new Error(await readApiError(createdResponse, "The quest could not be created."));
+      const created = await createdResponse.json() as Quest;
+
+      const publishResponse = await fetch(apiUrl(`/quests/${created.id}/publish`), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!publishResponse.ok) throw new Error(await readApiError(publishResponse, "The quest draft could not be published."));
+      const published = await publishResponse.json() as Quest;
+      setPublishedQuest(published);
+
+      if (published.status === "OPEN") router.push(`/quests/${published.id}`);
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : "The quest could not be published.");
+    } finally {
+      setPublishing(false);
+    }
   }
 
   return (
@@ -68,6 +136,7 @@ export default function CreateQuestPage() {
                 <p className="mt-2 text-sm text-muted">Make it sound like something people would actually want to try.</p>
                 <label className="mt-7 block text-sm font-bold">Quest title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} className="mt-2 w-full rounded-xl border border-line bg-background px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Take the best sunset photo before 6 PM" /></label>
                 <label className="mt-5 block text-sm font-bold">What should people do?<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} className="mt-2 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Give people a clear, fun challenge…" /></label>
+                <label className="mt-5 block text-sm font-bold">Submission deadline<span className="mt-2 flex items-center gap-3 rounded-xl border border-line bg-background px-4"><CalendarDays size={18} className="text-muted" /><input type="datetime-local" value={deadline} onChange={(event) => { const value = event.target.value; setDeadline(value); setDeadlineValid(new Date(value).getTime() > Date.now()); }} className="w-full bg-transparent py-3 font-normal outline-none" /></span><span className="mt-2 block text-xs font-normal text-muted">Deadlines use your current timezone and cannot be changed after entries begin.</span></label>
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
                   {(["Friends", "Bounty", "Explore"] as QuestType[]).map((type) => (
                     <button key={type} onClick={() => setQuestType(type)} className={`rounded-xl border p-4 text-left ${questType === type ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-display font-bold">{type}</span><span className="mt-1 block text-xs leading-5 text-muted">{type === "Friends" ? "Challenge your circle" : type === "Bounty" ? "Offer a small reward" : "Create a real-world mission"}</span></button>
@@ -91,20 +160,20 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 3 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 4 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">How are winners picked?</h1><div className="mt-7 grid gap-3 sm:grid-cols-2">{(["First valid", "Best submission"] as SelectionMethod[]).map((method) => <button key={method} onClick={() => setSelectionMethod(method)} className={`rounded-xl border p-5 text-left ${selectionMethod === method ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-bold">{method}</span><span className="mt-2 block text-sm leading-5 text-muted">{method === "First valid" ? "The earliest qualifying entries win. Submission timestamps cannot be reordered." : "Choose from valid entries using your published criteria."}</span></button>)}</div><fieldset className="mt-7"><legend className="text-sm font-bold">Number of winners</legend><div className="mt-3 flex gap-3">{[1, 2, 3].filter((count) => count <= maxEntries).map((count) => <button key={count} onClick={() => setWinners(count)} className={`grid h-12 w-16 place-items-center rounded-xl border font-bold ${winners === count ? "border-dark bg-dark text-white" : "border-line"}`}>{count}</button>)}</div></fieldset></div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 4 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">How are winners picked?</h1><div className="mt-7 grid gap-3 sm:grid-cols-2">{(["First valid", "Best submission"] as SelectionMethod[]).map((method) => <button key={method} onClick={() => setSelectionMethod(method)} className={`rounded-xl border p-5 text-left ${selectionMethod === method ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-bold">{method}</span><span className="mt-2 block text-sm leading-5 text-muted">{method === "First valid" ? "The earliest qualifying entries win. Submission timestamps cannot be reordered." : "Choose from valid entries using your published criteria."}</span></button>)}</div>{selectionMethod === "Best submission" ? <label className="mt-5 block text-sm font-bold">Published judging criteria<textarea value={judgingCriteria} onChange={(event) => setJudgingCriteria(event.target.value)} maxLength={500} rows={3} className="mt-2 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="For example: originality, composition, and how closely the entry follows the brief." /></label> : null}<fieldset className="mt-7"><legend className="text-sm font-bold">Number of winners</legend><div className="mt-3 flex gap-3">{[1, 2, 3].filter((count) => count <= maxEntries).map((count) => <button key={count} onClick={() => setWinners(count)} className={`grid h-12 w-16 place-items-center rounded-xl border font-bold ${winners === count ? "border-dark bg-dark text-white" : "border-line"}`}>{count}</button>)}</div></fieldset></div>
             ) : null}
 
             {step === 4 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 5 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Is there a reward?</h1><div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => setRewardEnabled(false)} className={`rounded-xl border p-5 text-left ${!rewardEnabled ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-bold">Just for fun</span><span className="mt-1 block text-sm text-muted">Recognition and achievements.</span></button><button onClick={() => setRewardEnabled(true)} className={`rounded-xl border p-5 text-left ${rewardEnabled ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="flex items-center gap-2 font-bold"><WalletCards size={18} /> Monetary reward</span><span className="mt-1 block text-sm text-muted">Funding must be verified before publishing.</span></button></div>{rewardEnabled ? <div className="mt-6 rounded-xl bg-background p-5"><label className="text-sm font-bold">USD per winner<input type="number" min={1} value={rewardAmount} onChange={(event) => setRewardAmount(Math.max(1, Number(event.target.value)))} className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-lg font-bold" /></label><div className="mt-5 flex items-center justify-between border-t border-line pt-5"><span className="text-sm text-muted">{winners} winner{winners > 1 ? "s" : ""}</span><span className="font-display text-xl font-bold">${totalFunding} total funding</span></div><p className="mt-2 text-xs text-muted">Payment and network fees will be shown separately before approval.</p></div> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 5 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Is there a reward?</h1><div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => setRewardEnabled(false)} className={`rounded-xl border p-5 text-left ${!rewardEnabled ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-bold">Just for fun</span><span className="mt-1 block text-sm text-muted">Recognition and achievements.</span></button><button onClick={() => setRewardEnabled(true)} className={`rounded-xl border p-5 text-left ${rewardEnabled ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="flex items-center gap-2 font-bold"><WalletCards size={18} /> Monetary reward</span><span className="mt-1 block text-sm text-muted">Funding must be verified before publishing.</span></button></div>{rewardEnabled ? <div className="mt-6 rounded-xl bg-background p-5"><label className="text-sm font-bold">USD per winner<input type="number" min={1} value={rewardAmount} onChange={(event) => setRewardAmount(Math.max(1, Number(event.target.value) || 1))} className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-lg font-bold" /></label><label className="mt-4 block text-sm font-bold">Settlement asset<select value={settlementAsset} onChange={(event) => setSettlementAsset(event.target.value as "NIM" | "USDT")} className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 font-normal"><option value="NIM">NIM · Nimiq testnet</option><option value="USDT">USDT · Polygon Amoy</option></select></label><div className="mt-5 flex items-center justify-between border-t border-line pt-5"><span className="text-sm text-muted">{winners} winner{winners > 1 ? "s" : ""}</span><span className="font-display text-xl font-bold">${totalFunding} total funding</span></div><p className="mt-2 text-xs text-muted">Payment and network fees will be shown separately before approval.</p></div> : null}</div>
             ) : null}
 
             {step === 5 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `$${rewardAmount} each · $${totalFunding} total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{ready ? <div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Draft validated.</strong><br />Connect the database to publish this quest from your account.</p></div> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `$${rewardAmount} each · $${totalFunding} total · ${settlementAsset}` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The reward pool must be funded and verified before this quest can open.</p></div> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
             ) : null}
 
             <div className="mt-9 flex items-center justify-between border-t border-line pt-5">
               <button disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))} className="flex items-center gap-2 rounded-full px-4 py-3 text-sm font-bold disabled:opacity-30"><ArrowLeft size={17} /> Back</button>
-              <button onClick={next} disabled={(step === 0 && (!title.trim() || !description.trim())) || (step === 2 && proof.length === 0)} className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{step === 5 ? (rewardEnabled ? "Continue to funding" : "Publish quest") : "Continue"}<ArrowRight size={17} /></button>
+              <button onClick={next} disabled={publishing || (step === 0 && !detailsValid) || (step === 2 && proof.length === 0) || (step === 3 && selectionMethod === "Best submission" && judgingCriteria.trim().length < 3) || Boolean(publishedQuest)} className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{publishing ? <><LoaderCircle size={17} className="animate-spin" /> Publishing…</> : step === 5 ? (rewardEnabled ? "Save and continue to funding" : "Publish quest") : "Continue"}{!publishing ? <ArrowRight size={17} /> : null}</button>
             </div>
           </div>
         </section>

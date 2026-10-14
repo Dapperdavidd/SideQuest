@@ -1,15 +1,26 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { Bell, Bookmark, Compass, MapPin, Plus, Search, Sparkles, Trophy, UserRound } from "lucide-react";
+import {
+  Bell,
+  Bookmark,
+  Compass,
+  Plus,
+  Search,
+  Sparkles,
+  Trophy,
+  UserRound,
+  UsersRound,
+} from "lucide-react";
 import { Logo } from "@/components/logo";
 import { QuestCard } from "@/components/quest-card";
+import {
+  formatDeadline,
+  formatReward,
+  listQuests,
+  questImageClass,
+  type Quest,
+} from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
-
-const quests = [
-  { imageClass: "photo-coffee", title: "Show us your coffee ritual", creator: "Brew & Co.", reward: "$10", entries: "3/5 entries", deadline: "4 days left" },
-  { imageClass: "photo-campus", title: "Campus talent hunt", creator: "Uni Lagos", reward: "$30", entries: "2/5 entries", deadline: "6 days left" },
-  { imageClass: "photo-run", title: "Weekend run challenge", creator: "Run Club", reward: "$15", entries: "4/10 entries", deadline: "3 days left" },
-];
 
 export default function DiscoverPage() {
   return (
@@ -20,9 +31,12 @@ export default function DiscoverPage() {
 }
 
 async function DiscoverExperience() {
-  const viewer = await getViewer();
+  const viewerPromise = getViewer();
+  const questsPromise = listQuests().catch(() => null);
+  const [viewer, quests] = await Promise.all([viewerPromise, questsPromise]);
   const firstName = viewer?.displayName.split(/\s+/)[0] || "Explorer";
   const initial = firstName.charAt(0).toUpperCase();
+  const featured = quests?.[0] ?? null;
 
   return (
     <main className="min-h-screen bg-[#101310] p-3 text-white sm:p-5">
@@ -31,8 +45,8 @@ async function DiscoverExperience() {
           <Logo inverse />
           <nav className="mt-12 space-y-2" aria-label="App navigation">
             <Link className="flex items-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-dark" href="/discover"><Compass size={19} />Discover</Link>
-            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="#"><Trophy size={19} />Quests</Link>
-            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="/create"><Plus size={19} />Create</Link>
+            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href="/discover"><Trophy size={19} />Quests</Link>
+            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/create" : "/auth?next=/create"}><Plus size={19} />Create</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/profile" : "/auth"}><UserRound size={19} />{viewer ? "Profile" : "Sign in"}</Link>
           </nav>
           <div className="mt-auto rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="flex items-center gap-2 text-xs font-bold text-accent"><Sparkles size={14} /> MINI APP READY</div><p className="mt-2 text-xs leading-5 text-white/50">Connect Nimiq Pay only when you are ready to fund or receive a reward.</p></div>
@@ -46,24 +60,59 @@ async function DiscoverExperience() {
           </header>
           <div className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="min-w-0 px-5 py-7 sm:px-8">
-              <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-white/45">{viewer ? `Welcome back, ${firstName}` : "Browse freely as a guest"}</p><h1 className="mt-1 font-display text-3xl font-bold tracking-tight">What will you do today?</h1></div><Link href={viewer ? "/create" : "/auth"} className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">{viewer ? "Create a quest" : "Sign in to create"}</Link></div>
+              <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-white/45">{viewer ? `Welcome back, ${firstName}` : "Browse freely as a guest"}</p><h1 className="mt-1 font-display text-3xl font-bold tracking-tight">What will you do today?</h1></div><Link href={viewer ? "/create" : "/auth?next=/create"} className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">{viewer ? "Create a quest" : "Sign in to create"}</Link></div>
               <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{["All", "Friends", "Bounties", "Explore", "Nearby"].map((filter, index) => <button key={filter} className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${index === 0 ? "bg-accent text-dark" : "border border-white/10 text-white/60"}`}>{filter}</button>)}</div>
-              <article className="photo-sunset mt-5 min-h-[310px] rounded-[1.35rem] bg-cover bg-center p-6 sm:p-8"><div className="flex min-h-[250px] max-w-xl flex-col justify-end"><span className="w-fit rounded-full bg-[#9167ff] px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider">Featured explore</span><h2 className="mt-3 font-display text-3xl font-bold">City sunset challenge</h2><p className="mt-2 text-sm text-white/70">Capture the best sunset spot in your city before the light disappears.</p><div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-semibold"><span>$20 reward</span><span>3/5 entries</span><span>1 winner</span><span>6 days left</span></div></div></article>
-              <div className="mt-8 flex items-center justify-between"><h2 className="font-display text-xl font-bold">Trending quests</h2><button className="text-sm text-white/50">See all →</button></div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{quests.map((quest) => <QuestCard key={quest.title} {...quest} />)}</div>
+
+              {featured ? <FeaturedQuest quest={featured} /> : null}
+
+              <div className="mt-8 flex items-center justify-between"><h2 className="font-display text-xl font-bold">Open quests</h2>{quests?.length ? <span className="text-sm text-white/50">{quests.length} live</span> : null}</div>
+              {quests === null ? (
+                <div className="mt-4 rounded-[1.25rem] border border-[#ffcf5a]/25 bg-[#ffcf5a]/10 p-6"><h3 className="font-bold text-[#ffe3a0]">The quest service is taking a breather.</h3><p className="mt-2 text-sm leading-6 text-white/55">Your account is fine. Refresh in a moment to reconnect to the live feed.</p></div>
+              ) : quests.length ? (
+                <div className="mt-4 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{quests.map((quest) => <QuestCard key={quest.id} href={`/quests/${quest.id}`} imageClass={questImageClass(quest.quest_type)} title={quest.title} creator={quest.creator_display_name} reward={quest.reward_enabled ? formatReward(quest) : undefined} entries={`${quest.entries_received}/${quest.max_entries} entries`} deadline={formatDeadline(quest.deadline)} />)}</div>
+              ) : (
+                <div className="mt-4 rounded-[1.25rem] border border-dashed border-white/15 bg-white/[0.03] p-8 text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-accent text-dark"><Plus size={22} /></span><h3 className="mt-4 font-display text-xl font-bold">The first quest is yours to create.</h3><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/50">Publish a free challenge now. Reward quests stay private until their funding is verified.</p><Link href={viewer ? "/create" : "/auth?next=/create"} className="mt-5 inline-block rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">{viewer ? "Create the first quest" : "Sign in to create"}</Link></div>
+              )}
             </div>
             <aside className="hidden border-l border-white/10 p-6 xl:block">
-              <div className="photo-coffee h-52 rounded-[1.25rem] bg-cover bg-center" />
-              <div className="mt-5 flex items-start justify-between gap-4"><div><span className="rounded-full bg-[#9167ff] px-2.5 py-1 text-[0.62rem] font-bold uppercase">Bounty</span><h2 className="mt-3 font-display text-2xl font-bold leading-tight">Show us your coffee ritual</h2></div><button aria-label="Save quest" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10"><Bookmark size={18} /></button></div>
-              <p className="mt-4 text-sm leading-6 text-white/55">Create a 15–30 second original video showing your coffee ritual at Brew & Co. Be creative and show what makes it special to you.</p>
-              <dl className="mt-5 grid grid-cols-3 gap-2"><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">$10</dt><dd className="text-[0.65rem] text-white/45">per winner</dd></div><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">1</dt><dd className="text-[0.65rem] text-white/45">winner</dd></div><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">2</dt><dd className="text-[0.65rem] text-white/45">slots left</dd></div></dl>
-              <div className="mt-5 flex items-center gap-2 text-sm text-white/60"><MapPin size={16} /> Victoria Island, Lagos</div>
-              <button className="mt-6 w-full rounded-xl bg-accent py-3.5 font-bold text-dark">Take this quest</button>
-              <p className="mt-3 text-center text-xs text-white/35">Submitting, not joining, uses one of the five entry slots.</p>
+              {featured ? <QuestSpotlight quest={featured} /> : <DiscoveryGuide />}
             </aside>
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function FeaturedQuest({ quest }: { quest: Quest }) {
+  return (
+    <Link href={`/quests/${quest.id}`} className={`${questImageClass(quest.quest_type)} mt-5 block min-h-[310px] rounded-[1.35rem] bg-cover bg-center p-6 sm:p-8`}>
+      <div className="flex min-h-[250px] max-w-xl flex-col justify-end">
+        <span className="w-fit rounded-full bg-[#9167ff] px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider">Featured {quest.quest_type.toLowerCase()}</span>
+        <h2 className="mt-3 font-display text-3xl font-bold">{quest.title}</h2>
+        <p className="mt-2 line-clamp-2 text-sm text-white/70">{quest.description}</p>
+        <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-semibold"><span>{formatReward(quest)}</span><span>{quest.entries_received}/{quest.max_entries} entries</span><span>{quest.winner_count} winner{quest.winner_count === 1 ? "" : "s"}</span><span>{formatDeadline(quest.deadline)}</span></div>
+      </div>
+    </Link>
+  );
+}
+
+function QuestSpotlight({ quest }: { quest: Quest }) {
+  return (
+    <>
+      <div className={`${questImageClass(quest.quest_type)} h-52 rounded-[1.25rem] bg-cover bg-center`} />
+      <div className="mt-5 flex items-start justify-between gap-4"><div><span className="rounded-full bg-[#9167ff] px-2.5 py-1 text-[0.62rem] font-bold uppercase">{quest.quest_type}</span><h2 className="mt-3 font-display text-2xl font-bold leading-tight">{quest.title}</h2></div><button aria-label="Save quest" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10"><Bookmark size={18} /></button></div>
+      <p className="mt-4 line-clamp-4 text-sm leading-6 text-white/55">{quest.description}</p>
+      <dl className="mt-5 grid grid-cols-3 gap-2"><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">{formatReward(quest)}</dt><dd className="text-[0.65rem] text-white/45">per winner</dd></div><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">{quest.winner_count}</dt><dd className="text-[0.65rem] text-white/45">winner{quest.winner_count === 1 ? "" : "s"}</dd></div><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">{Math.max(0, quest.max_entries - quest.entries_received)}</dt><dd className="text-[0.65rem] text-white/45">slots left</dd></div></dl>
+      <div className="mt-5 flex items-center gap-2 text-sm text-white/60"><UsersRound size={16} /> {quest.participants_joined} joined</div>
+      <Link href={`/quests/${quest.id}`} className="mt-6 block w-full rounded-xl bg-accent py-3.5 text-center font-bold text-dark">View quest</Link>
+      <p className="mt-3 text-center text-xs text-white/35">Submitting, not joining, uses one of the entry slots.</p>
+    </>
+  );
+}
+
+function DiscoveryGuide() {
+  return (
+    <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.035] p-6"><span className="grid h-12 w-12 place-items-center rounded-full bg-accent text-dark"><Compass size={22} /></span><h2 className="mt-5 font-display text-2xl font-bold">Real people. Real quests.</h2><p className="mt-3 text-sm leading-6 text-white/55">The feed now shows only published quests from the live database. Joining records your interest; a submission uses an entry slot.</p></div>
   );
 }
