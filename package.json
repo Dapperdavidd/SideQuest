@@ -8,5 +8,8 @@
     "lint:web": "pnpm --dir apps/web lint",
     "test:api": "cargo test --manifest-path services/api/Cargo.toml",
     "test:mobile": "flutter test apps/mobile"
+  },
+  "devDependencies": {
+    "supabase": "^2.120.0"
   }
 }
