@@ -313,10 +313,10 @@ components:
           minimum: 1
         reward_currency:
           type: [string, "null"]
-          enum: [USD, null]
+          enum: [NIM, null]
         settlement_asset:
           type: [string, "null"]
-          enum: [NIM, USDT, null]
+          enum: [NIM, null]
         deadline:
           type: string
           format: date-time

@@ -99,11 +99,8 @@ export async function readApiError(response: Response, fallback: string) {
 
 export function formatReward(quest: Quest) {
   if (!quest.reward_enabled || quest.reward_amount_minor === null) return "Just for fun";
-  return new Intl.NumberFormat("en", {
-    style: "currency",
-    currency: quest.reward_currency ?? "USD",
-    maximumFractionDigits: 2,
-  }).format(quest.reward_amount_minor / 100);
+  const amount = quest.reward_amount_minor / 100_000;
+  return `${new Intl.NumberFormat("en", { maximumFractionDigits: 5 }).format(amount)} NIM`;
 }
 
 export function formatDeadline(deadline: string) {

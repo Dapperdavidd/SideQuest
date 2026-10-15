@@ -251,8 +251,8 @@ impl CreateQuest {
 
         if self.reward_enabled {
             if self.reward_amount_minor.is_none_or(|amount| amount <= 0)
-                || self.reward_currency.as_deref() != Some("USD")
-                || !matches!(self.settlement_asset.as_deref(), Some("NIM" | "USDT"))
+                || self.reward_currency.as_deref() != Some("NIM")
+                || self.settlement_asset.as_deref() != Some("NIM")
             {
                 return Err(QuestError::InvalidQuest);
             }
@@ -692,6 +692,26 @@ mod tests {
     fn rejects_reward_metadata_on_free_quests() {
         let mut quest = valid_quest();
         quest.reward_amount_minor = Some(1_000);
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
+    fn accepts_nim_denominated_reward_quests() {
+        let mut quest = valid_quest();
+        quest.reward_enabled = true;
+        quest.reward_amount_minor = Some(1_000_000);
+        quest.reward_currency = Some("NIM".to_string());
+        quest.settlement_asset = Some("NIM".to_string());
+        assert!(quest.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_usd_denominated_reward_quests() {
+        let mut quest = valid_quest();
+        quest.reward_enabled = true;
+        quest.reward_amount_minor = Some(1_000);
+        quest.reward_currency = Some("USD".to_string());
+        quest.settlement_asset = Some("NIM".to_string());
         assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
     }
 }

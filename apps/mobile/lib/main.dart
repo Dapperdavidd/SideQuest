@@ -202,11 +202,11 @@ class Quest {
 
   String get rewardLabel {
     if (!rewardEnabled || rewardAmountMinor == null) return 'Just for fun';
-    final amount = rewardAmountMinor! / 100;
+    final amount = rewardAmountMinor! / 100000;
     final formatted = amount == amount.roundToDouble()
         ? amount.toStringAsFixed(0)
         : amount.toStringAsFixed(2);
-    return '${rewardCurrency ?? 'USD'} $formatted';
+    return '$formatted NIM';
   }
 
   String get timeLeft {
@@ -2942,7 +2942,6 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   String selectionMethod = 'FIRST_VALID';
   int winnerCount = 1;
   bool rewardEnabled = false;
-  String settlementAsset = 'NIM';
   bool publishing = false;
   String? errorMessage;
 
@@ -3025,10 +3024,10 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             : null,
         'reward_enabled': rewardEnabled,
         'reward_amount_minor': rewardEnabled
-            ? (rewardAmount! * 100).round()
+            ? (rewardAmount! * 100000).round()
             : null,
-        'reward_currency': rewardEnabled ? 'USD' : null,
-        'settlement_asset': rewardEnabled ? settlementAsset : null,
+        'reward_currency': rewardEnabled ? 'NIM' : null,
+        'settlement_asset': rewardEnabled ? 'NIM' : null,
         'deadline': deadline.toUtc().toIso8601String(),
       }, session.accessToken);
       final published = await repository.publishQuest(
@@ -3445,25 +3444,13 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           controller: rewardController,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
-            labelText: 'USD per winner',
-            prefixText: r'$ ',
+            labelText: 'NIM per winner',
+            suffixText: ' NIM',
             border: OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: settlementAsset,
-          decoration: const InputDecoration(
-            labelText: 'Settlement asset',
-            border: OutlineInputBorder(),
-          ),
-          items: const [
-            DropdownMenuItem(value: 'NIM', child: Text('NIM · testnet')),
-            DropdownMenuItem(value: 'USDT', child: Text('USDT · Polygon Amoy')),
-          ],
-          onChanged: (value) =>
-              setState(() => settlementAsset = value ?? 'NIM'),
-        ),
+        const SizedBox(height: 8),
+        const Text('Funded and independently verified on Nimiq testnet.'),
       ],
     ],
   );
@@ -3489,7 +3476,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       (
         'Reward',
         rewardEnabled
-            ? '\$${reward.toStringAsFixed(2)} each · $settlementAsset'
+            ? '${reward.toStringAsFixed(5)} NIM each'
             : 'Just for fun',
       ),
     ];
