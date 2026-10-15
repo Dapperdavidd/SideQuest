@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 const background = Color(0xFFF8F8F5);
 const ink = Color(0xFF171917);
@@ -14,8 +15,32 @@ const apiBaseUrl = String.fromEnvironment(
   'API_URL',
   defaultValue: 'http://127.0.0.1:8080/api/v1',
 );
+const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const supabasePublishableKey = String.fromEnvironment(
+  'SUPABASE_PUBLISHABLE_KEY',
+);
+const mobileAuthRedirect = 'app.sidequest://login-callback/';
+final supabaseConfigured =
+    supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty;
 
-void main() => runApp(const ProviderScope(child: SideQuestApp()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (supabaseConfigured) {
+    await Supabase.initialize(
+      url: supabaseUrl,
+      publishableKey: supabasePublishableKey,
+    );
+  }
+  runApp(const ProviderScope(child: SideQuestApp()));
+}
+
+Session? get currentSession =>
+    supabaseConfigured ? Supabase.instance.client.auth.currentSession : null;
+
+final authStateProvider = StreamProvider<AuthState>((ref) {
+  if (!supabaseConfigured) return const Stream.empty();
+  return Supabase.instance.client.auth.onAuthStateChange;
+});
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -31,6 +56,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           questId: state.pathParameters['id']!,
           initialQuest: state.extra as Quest?,
         ),
+      ),
+      GoRoute(
+        path: '/auth',
+        builder: (context, state) =>
+            AuthScreen(next: state.uri.queryParameters['next'] ?? '/discover'),
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileScreen(),
       ),
     ],
   );
@@ -161,6 +195,13 @@ class QuestRepository {
     final response = await _dio.get<Map<String, dynamic>>('/quests/$id');
     return Quest.fromJson(response.data!);
   }
+
+  Future<void> joinQuest(String id, String accessToken) async {
+    await _dio.post<void>(
+      '/quests/$id/join',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
 }
 
 final questRepositoryProvider = Provider<QuestRepository>(
@@ -186,6 +227,15 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     final asyncQuests = ref.watch(questsProvider);
+    ref.watch(authStateProvider);
+    final session = currentSession;
+    final metadata = session?.user.userMetadata ?? const <String, dynamic>{};
+    final displayName =
+        (metadata['full_name'] as String?) ??
+        (metadata['name'] as String?) ??
+        session?.user.email?.split('@').first ??
+        'Explorer';
+    final firstName = displayName.trim().split(RegExp(r'\s+')).first;
     final filterTypes = [null, 'FRIENDS', 'BOUNTY', 'EXPLORE'];
 
     return Scaffold(
@@ -218,12 +268,18 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       onPressed: () {},
                       icon: const Icon(Icons.notifications_none_rounded),
                     ),
-                    const CircleAvatar(
-                      backgroundColor: ink,
-                      foregroundColor: accent,
-                      child: Text(
-                        'H',
-                        style: TextStyle(fontWeight: FontWeight.w800),
+                    InkWell(
+                      onTap: () => context.push(
+                        session == null ? '/auth?next=/profile' : '/profile',
+                      ),
+                      customBorder: const CircleBorder(),
+                      child: CircleAvatar(
+                        backgroundColor: ink,
+                        foregroundColor: accent,
+                        child: Text(
+                          firstName.characters.first.toUpperCase(),
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
                       ),
                     ),
                   ],
@@ -236,9 +292,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Good morning, Hannah ✌️',
-                      style: TextStyle(color: muted, fontSize: 13),
+                    Text(
+                      session == null
+                          ? 'Browse freely as a guest'
+                          : 'Good morning, $firstName ✌️',
+                      style: const TextStyle(color: muted, fontSize: 13),
                     ),
                     const SizedBox(height: 6),
                     const Text(
@@ -308,6 +366,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: 0,
         indicatorColor: accent,
+        onDestinationSelected: (index) {
+          if (index == 0) return;
+          if (index == 3) {
+            context.push(session == null ? '/auth?next=/profile' : '/profile');
+            return;
+          }
+          context.push('/auth?next=/discover');
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.explore_outlined),
@@ -796,22 +862,80 @@ class _QuestDetail extends StatelessWidget {
       ),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-        child: FilledButton(
-          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sign in on mobile to join this quest.'),
-            ),
-          ),
-          style: FilledButton.styleFrom(
-            backgroundColor: accent,
-            foregroundColor: ink,
-            minimumSize: const Size.fromHeight(54),
-          ),
-          child: const Text(
-            'Join this quest',
-            style: TextStyle(fontWeight: FontWeight.w800),
-          ),
-        ),
+        child: JoinQuestButton(questId: quest.id),
+      ),
+    );
+  }
+}
+
+class JoinQuestButton extends ConsumerStatefulWidget {
+  const JoinQuestButton({required this.questId, super.key});
+  final String questId;
+
+  @override
+  ConsumerState<JoinQuestButton> createState() => _JoinQuestButtonState();
+}
+
+class _JoinQuestButtonState extends ConsumerState<JoinQuestButton> {
+  bool loading = false;
+  bool joined = false;
+
+  Future<void> join() async {
+    final session = currentSession;
+    if (session == null) {
+      context.push(
+        '/auth?next=${Uri.encodeComponent('/quests/${widget.questId}')}',
+      );
+      return;
+    }
+    setState(() => loading = true);
+    try {
+      await ref
+          .read(questRepositoryProvider)
+          .joinQuest(widget.questId, session.accessToken);
+      setState(() => joined = true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Quest joined successfully.')),
+        );
+      }
+    } on DioException catch (error) {
+      final body = error.response?.data;
+      final message = body is Map<String, dynamic>
+          ? body['message'] as String? ?? 'Unable to join this quest.'
+          : 'Unable to join this quest.';
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    return FilledButton.icon(
+      onPressed: loading || joined ? null : join,
+      style: FilledButton.styleFrom(
+        backgroundColor: accent,
+        foregroundColor: ink,
+        minimumSize: const Size.fromHeight(54),
+      ),
+      icon: loading
+          ? const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: ink),
+            )
+          : Icon(joined ? Icons.check_rounded : Icons.flag_outlined),
+      label: Text(
+        joined
+            ? 'Quest joined'
+            : currentSession == null
+            ? 'Sign in to join'
+            : 'Join this quest',
+        style: const TextStyle(fontWeight: FontWeight.w800),
       ),
     );
   }
@@ -843,4 +967,281 @@ class _QuestStat extends StatelessWidget {
       ),
     ),
   );
+}
+
+class AuthScreen extends ConsumerStatefulWidget {
+  const AuthScreen({required this.next, super.key});
+  final String next;
+
+  @override
+  ConsumerState<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends ConsumerState<AuthScreen> {
+  final emailController = TextEditingController();
+  bool emailOpen = false;
+  bool loading = false;
+  String? message;
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    super.dispose();
+  }
+
+  String get destination =>
+      widget.next.startsWith('/') && !widget.next.startsWith('//')
+      ? widget.next
+      : '/discover';
+
+  Future<void> signInWithGoogle() async {
+    if (!supabaseConfigured) {
+      setState(() => message = 'Add the public Supabase build values first.');
+      return;
+    }
+    setState(() {
+      loading = true;
+      message = null;
+    });
+    try {
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: mobileAuthRedirect,
+      );
+    } on AuthException catch (error) {
+      setState(() => message = error.message);
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> sendEmailLink() async {
+    if (!supabaseConfigured) {
+      setState(() => message = 'Add the public Supabase build values first.');
+      return;
+    }
+    final email = emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => message = 'Enter a valid email address.');
+      return;
+    }
+    setState(() {
+      loading = true;
+      message = null;
+    });
+    try {
+      await Supabase.instance.client.auth.signInWithOtp(
+        email: email,
+        emailRedirectTo: mobileAuthRedirect,
+      );
+      setState(
+        () => message = 'Check your inbox for your secure sign-in link.',
+      );
+    } on AuthException catch (error) {
+      setState(() => message = error.message);
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    if (currentSession != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go(destination);
+      });
+    }
+
+    return Scaffold(
+      appBar: AppBar(backgroundColor: background),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 40),
+          children: [
+            const Center(
+              child: Text(
+                'sidequest.',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 45),
+            const Text(
+              'Welcome to SideQuest',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 30,
+                height: 1.05,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -1,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Sign in to create quests, join challenges, and submit official entries.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: muted, height: 1.5),
+            ),
+            const SizedBox(height: 32),
+            OutlinedButton.icon(
+              onPressed: loading ? null : signInWithGoogle,
+              icon: const Text(
+                'G',
+                style: TextStyle(
+                  color: Color(0xFF4285F4),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              label: const Text('Continue with Google'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ink,
+                minimumSize: const Size.fromHeight(54),
+                side: const BorderSide(color: line),
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: null,
+              icon: const Icon(Icons.apple),
+              label: const Text('Apple sign-in requires setup'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(54),
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: loading
+                  ? null
+                  : () => setState(() => emailOpen = !emailOpen),
+              icon: const Icon(Icons.mail_outline_rounded),
+              label: const Text('Continue with email'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ink,
+                minimumSize: const Size.fromHeight(54),
+                side: const BorderSide(color: line),
+              ),
+            ),
+            if (emailOpen) ...[
+              const SizedBox(height: 14),
+              TextField(
+                controller: emailController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
+                decoration: const InputDecoration(
+                  labelText: 'Email address',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              FilledButton(
+                onPressed: loading ? null : sendEmailLink,
+                style: FilledButton.styleFrom(
+                  backgroundColor: ink,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                child: const Text('Email me a sign-in link'),
+              ),
+            ],
+            if (loading) ...[
+              const SizedBox(height: 18),
+              const Center(child: CircularProgressIndicator(color: ink)),
+            ],
+            if (message != null) ...[
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE9FFB0),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(message!, style: const TextStyle(height: 1.4)),
+              ),
+            ],
+            const SizedBox(height: 26),
+            TextButton(
+              onPressed: () => context.go('/discover'),
+              child: const Text('Browse quests as a guest'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ProfileScreen extends ConsumerWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(authStateProvider);
+    final session = currentSession;
+    if (session == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.go('/auth?next=/profile');
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+    final metadata = session.user.userMetadata ?? const <String, dynamic>{};
+    final name =
+        (metadata['full_name'] as String?) ??
+        (metadata['name'] as String?) ??
+        session.user.email?.split('@').first ??
+        'Explorer';
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Profile'), backgroundColor: background),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            CircleAvatar(
+              radius: 46,
+              backgroundColor: ink,
+              foregroundColor: accent,
+              child: Text(
+                name.characters.first.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              session.user.email ?? '',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: muted),
+            ),
+            const SizedBox(height: 32),
+            OutlinedButton.icon(
+              onPressed: () async {
+                await Supabase.instance.client.auth.signOut();
+                if (context.mounted) context.go('/discover');
+              },
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('Sign out'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ink,
+                minimumSize: const Size.fromHeight(52),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
