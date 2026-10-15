@@ -128,6 +128,53 @@ paths:
           description: Membership created
         "409":
           description: Quest is closed, already joined, or owned by the user
+  /quests/{questId}/funding-intents:
+    post:
+      summary: Create or reuse a server-authoritative NIM funding intent
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "201":
+          description: Funding intent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FundingIntent"
+        "200":
+          description: Existing unexpired funding intent returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FundingIntent"
+        "403":
+          description: The authenticated user is not the creator
+        "409":
+          description: Quest is not awaiting valid NIM funding
+        "503":
+          description: Nimiq funding configuration is incomplete
+  /funding-intents/{intentId}:
+    get:
+      summary: Read an authenticated creator's funding intent
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: intentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current funding intent state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FundingIntent"
+        "404":
+          description: Intent is absent or does not belong to the caller
   /quests/{questId}/entries:
     get:
       summary: List submissions and evidence for the quest creator
@@ -247,6 +294,52 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    FundingIntent:
+      type: object
+      required:
+        - id
+        - quest_id
+        - amount_luna
+        - amount_nim
+        - status
+        - network
+        - treasury_address
+        - payment_reference
+        - minimum_confirmations
+        - expires_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        quest_id:
+          type: string
+          format: uuid
+        amount_luna:
+          type: integer
+          minimum: 1
+        amount_nim:
+          type: string
+        status:
+          type: string
+          enum: [CREATED, PENDING, CONFIRMED, FAILED, EXPIRED]
+        network:
+          type: string
+          enum: [testnet]
+        treasury_address:
+          type: string
+        payment_reference:
+          type: string
+          maxLength: 64
+        minimum_confirmations:
+          type: integer
+          minimum: 1
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
     CreateQuest:
       type: object
       required:

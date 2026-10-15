@@ -2,7 +2,7 @@ use std::io;
 
 use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware::Logger, web};
-use api::{AppState, auth::AuthVerifier, configure_routes};
+use api::{AppState, PaymentConfig, auth::AuthVerifier, configure_routes};
 use sqlx::postgres::PgPoolOptions;
 
 #[actix_web::main]
@@ -37,9 +37,14 @@ async fn main() -> io::Result<()> {
         .connect(&database_url)
         .await
         .map_err(io::Error::other)?;
+    let payments = payment_config_from_environment();
+    if payments.is_none() {
+        tracing::warn!("Nimiq funding is disabled because its public configuration is incomplete");
+    }
     let state = AppState {
         database,
         auth: AuthVerifier::new(jwks_url),
+        payments,
     };
 
     tracing::info!(%host, %port, "starting SideQuest API");
@@ -54,4 +59,26 @@ async fn main() -> io::Result<()> {
     .bind((host, port))?
     .run()
     .await
+}
+
+fn payment_config_from_environment() -> Option<PaymentConfig> {
+    let network = std::env::var("NIMIQ_NETWORK").ok()?;
+    let treasury_address = std::env::var("NIMIQ_TREASURY_ADDRESS").ok()?;
+    let min_confirmations = std::env::var("NIMIQ_MIN_CONFIRMATIONS")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(2);
+
+    if network != "testnet"
+        || !api::payments::is_valid_nimiq_address(&treasury_address)
+        || min_confirmations < 1
+    {
+        return None;
+    }
+
+    Some(PaymentConfig {
+        network,
+        treasury_address,
+        min_confirmations,
+    })
 }

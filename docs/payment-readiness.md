@@ -28,7 +28,7 @@ Do not place a treasury private key, seed phrase, or raw signing material in `.e
 ## Inputs needed for the recommended testnet path
 
 - `NIMIQ_TREASURY_ADDRESS`: a dedicated Nimiq testnet receiving address.
-- `NIMIQ_RPC_URL`: a history-enabled testnet JSON-RPC endpoint that supports `getTransactionByHash`.
+- `NIMIQ_VERIFIER_URL`: the private URL of the SideQuest verifier service. The verifier uses Nimiq's official Node.js Web Client to join TestAlbatross directly, so development does not depend on an unlisted public testnet RPC server.
 - `NIMIQ_MIN_CONFIRMATIONS`: the confirmation policy; the placeholder is two.
 - Reward denomination policy: either publish rewards directly in NIM, or approve a server-side USD/NIM quote source, quote lifetime, rounding rule, and slippage policy.
 - `PAYOUT_SIGNER_URL`: an isolated service that accepts an authenticated, idempotent payout command and never exports its key.
@@ -40,7 +40,7 @@ USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supp
 ## Planned server flow
 
 1. The creator publishes a reward quest; it stays `AWAITING_FUNDING`.
-2. The authenticated creator requests an idempotent payment intent.
+2. The authenticated creator requests an idempotent payment intent. The API calculates the complete prize pool in integer luna, selects the configured treasury, creates a unique reference, and returns the same active intent on safe retries.
 3. The server fixes the settlement amount, expiry, network, treasury recipient, and unique quest memo/reference.
 4. Nimiq Pay asks the creator to approve `sendBasicTransactionWithData`.
 5. The client submits the resulting transaction identifier/serialized result to the API; client success remains `PENDING`, never `CONFIRMED`.

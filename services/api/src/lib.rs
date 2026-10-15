@@ -13,9 +13,17 @@ use sqlx::PgPool;
 use crate::auth::AuthVerifier;
 
 #[derive(Clone)]
+pub struct PaymentConfig {
+    pub network: String,
+    pub treasury_address: String,
+    pub min_confirmations: i32,
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub database: PgPool,
     pub auth: AuthVerifier,
+    pub payments: Option<PaymentConfig>,
 }
 
 #[derive(Serialize)]
@@ -47,6 +55,8 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(quests::publish_quest)
             .service(quests::join_quest)
             .service(quests::validate_quest)
+            .service(payments::create_funding_intent)
+            .service(payments::get_funding_intent)
             .service(entries::submit_entry)
             .service(reviews::list_entries_for_creator)
             .service(reviews::review_entry)
