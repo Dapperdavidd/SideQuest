@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const background = Color(0xFFF8F8F5);
@@ -53,6 +54,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/quests/:id',
         builder: (context, state) => QuestDetailScreen(
+          questId: state.pathParameters['id']!,
+          initialQuest: state.extra as Quest?,
+        ),
+      ),
+      GoRoute(
+        path: '/quests/:id/submit',
+        builder: (context, state) => SubmissionScreen(
           questId: state.pathParameters['id']!,
           initialQuest: state.extra as Quest?,
         ),
@@ -239,6 +247,19 @@ class QuestRepository {
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
     return Quest.fromJson(response.data!);
+  }
+
+  Future<Map<String, dynamic>> submitEntry(
+    String questId,
+    Map<String, dynamic> payload,
+    String accessToken,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests/$questId/entries',
+      data: payload,
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!;
   }
 }
 
@@ -1014,27 +1035,39 @@ class _JoinQuestButtonState extends ConsumerState<JoinQuestButton> {
   @override
   Widget build(BuildContext context) {
     ref.watch(authStateProvider);
-    return FilledButton.icon(
-      onPressed: loading || joined ? null : join,
-      style: FilledButton.styleFrom(
-        backgroundColor: accent,
-        foregroundColor: ink,
-        minimumSize: const Size.fromHeight(54),
-      ),
-      icon: loading
-          ? const SizedBox.square(
-              dimension: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: ink),
-            )
-          : Icon(joined ? Icons.check_rounded : Icons.flag_outlined),
-      label: Text(
-        joined
-            ? 'Quest joined'
-            : currentSession == null
-            ? 'Sign in to join'
-            : 'Join this quest',
-        style: const TextStyle(fontWeight: FontWeight.w800),
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FilledButton.icon(
+          onPressed: loading || joined ? null : join,
+          style: FilledButton.styleFrom(
+            backgroundColor: accent,
+            foregroundColor: ink,
+            minimumSize: const Size.fromHeight(54),
+          ),
+          icon: loading
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: ink),
+                )
+              : Icon(joined ? Icons.check_rounded : Icons.flag_outlined),
+          label: Text(
+            joined
+                ? 'Quest joined'
+                : currentSession == null
+                ? 'Sign in to join'
+                : 'Join this quest',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+        if (currentSession != null) ...[
+          const SizedBox(height: 3),
+          TextButton(
+            onPressed: () => context.push('/quests/${widget.questId}/submit'),
+            child: const Text('Already joined? Submit your entry'),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -1065,6 +1098,493 @@ class _QuestStat extends StatelessWidget {
       ),
     ),
   );
+}
+
+class SubmissionScreen extends ConsumerStatefulWidget {
+  const SubmissionScreen({required this.questId, this.initialQuest, super.key});
+
+  final String questId;
+  final Quest? initialQuest;
+
+  @override
+  ConsumerState<SubmissionScreen> createState() => _SubmissionScreenState();
+}
+
+class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
+  final captionController = TextEditingController();
+  final valueControllers = <String, TextEditingController>{};
+  final mediaFiles = <String, XFile>{};
+  final picker = ImagePicker();
+  bool submitting = false;
+  bool submitted = false;
+  bool closedForReview = false;
+  String? errorMessage;
+
+  @override
+  void dispose() {
+    captionController.dispose();
+    for (final controller in valueControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController controllerFor(String proof) =>
+      valueControllers.putIfAbsent(proof, () => TextEditingController());
+
+  Future<void> pickMedia(String proof, ImageSource source) async {
+    final file = proof == 'PHOTO'
+        ? await picker.pickImage(
+            source: source,
+            imageQuality: 88,
+            maxWidth: 2400,
+          )
+        : await picker.pickVideo(
+            source: source,
+            maxDuration: const Duration(seconds: 60),
+          );
+    if (file != null && mounted) {
+      setState(() {
+        mediaFiles[proof] = file;
+        errorMessage = null;
+      });
+    }
+  }
+
+  Future<void> chooseMedia(String proof) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose from library'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: Text(proof == 'PHOTO' ? 'Take a photo' : 'Record video'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source != null) await pickMedia(proof, source);
+  }
+
+  bool readyToSubmit(Quest quest) => quest.proofRequirements.every((proof) {
+    if (proof == 'PHOTO' || proof == 'VIDEO') {
+      return mediaFiles.containsKey(proof);
+    }
+    return controllerFor(proof).text.trim().isNotEmpty;
+  });
+
+  Future<void> submit(Quest quest) async {
+    final session = currentSession;
+    if (session == null) {
+      context.go(
+        '/auth?next=${Uri.encodeComponent('/quests/${quest.id}/submit')}',
+      );
+      return;
+    }
+    if (!readyToSubmit(quest)) {
+      setState(
+        () => errorMessage = 'Add every required proof before submitting.',
+      );
+      return;
+    }
+
+    setState(() {
+      submitting = true;
+      errorMessage = null;
+    });
+    final uploadedPaths = <String>[];
+    try {
+      final evidence = <Map<String, String>>[];
+      for (final proof in quest.proofRequirements) {
+        if (proof == 'PHOTO' || proof == 'VIDEO') {
+          final file = mediaFiles[proof]!;
+          final extension = file.name.contains('.')
+              ? file.name.split('.').last.toLowerCase()
+              : proof == 'PHOTO'
+              ? 'jpg'
+              : 'mp4';
+          final nonce = math.Random.secure()
+              .nextInt(0x7fffffff)
+              .toRadixString(16);
+          final path =
+              '${session.user.id}/${quest.id}/${DateTime.now().microsecondsSinceEpoch}_$nonce.$extension';
+          final bytes = await file.readAsBytes();
+          await Supabase.instance.client.storage
+              .from('entry-media')
+              .uploadBinary(
+                path,
+                bytes,
+                fileOptions: FileOptions(
+                  contentType:
+                      file.mimeType ??
+                      (proof == 'PHOTO' ? 'image/jpeg' : 'video/mp4'),
+                  upsert: false,
+                ),
+              );
+          uploadedPaths.add(path);
+          evidence.add({'proof_type': proof, 'value': path});
+        } else {
+          evidence.add({
+            'proof_type': proof,
+            'value': controllerFor(proof).text.trim(),
+          });
+        }
+      }
+
+      final result = await ref.read(questRepositoryProvider).submitEntry(
+        quest.id,
+        {
+          'caption': captionController.text.trim().isEmpty
+              ? null
+              : captionController.text.trim(),
+          'evidence': evidence,
+        },
+        session.accessToken,
+      );
+      ref.invalidate(questProvider(quest.id));
+      ref.invalidate(questsProvider);
+      ref.invalidate(myQuestsProvider);
+      if (mounted) {
+        setState(() {
+          submitted = true;
+          closedForReview = result['quest_closed_for_review'] as bool? ?? false;
+        });
+      }
+    } on Object catch (error) {
+      if (uploadedPaths.isNotEmpty) {
+        await Supabase.instance.client.storage
+            .from('entry-media')
+            .remove(uploadedPaths)
+            .catchError((_) => const <FileObject>[]);
+      }
+      if (!mounted) return;
+      var message = 'Your entry could not be submitted.';
+      if (error is DioException) {
+        final data = error.response?.data;
+        if (data is Map<String, dynamic>) {
+          message = data['message'] as String? ?? message;
+        }
+      } else if (error is StorageException) {
+        message = error.message;
+      }
+      setState(() => errorMessage = message);
+    } finally {
+      if (mounted) setState(() => submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context.go(
+            '/auth?next=${Uri.encodeComponent('/quests/${widget.questId}/submit')}',
+          );
+        }
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+
+    if (submitted) {
+      return Scaffold(
+        appBar: AppBar(backgroundColor: background),
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircleAvatar(
+                    radius: 42,
+                    backgroundColor: Color(0xFFE9FFB0),
+                    foregroundColor: ink,
+                    child: Icon(Icons.check_rounded, size: 42),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Entry submitted!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 29,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    closedForReview
+                        ? 'Your official timestamp is locked in. This filled the final slot, so the quest is now ready for creator review.'
+                        : 'Your official timestamp is locked in. We’ll notify you after the creator reviews your entry.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: muted, height: 1.5),
+                  ),
+                  const SizedBox(height: 26),
+                  FilledButton(
+                    onPressed: () => context.go('/my-quests'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: ink,
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    child: const Text('View my quests'),
+                  ),
+                  TextButton(
+                    onPressed: () => context.go('/discover'),
+                    child: const Text('Explore more quests'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final asyncQuest = widget.initialQuest == null
+        ? ref.watch(questProvider(widget.questId))
+        : AsyncData(widget.initialQuest!);
+    return asyncQuest.when(
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      ),
+      error: (_, _) => Scaffold(
+        appBar: AppBar(backgroundColor: background),
+        body: Center(
+          child: _QuestFeedError(
+            onRetry: () => ref.invalidate(questProvider(widget.questId)),
+          ),
+        ),
+      ),
+      data: (quest) => Scaffold(
+        appBar: AppBar(
+          title: const Text('Submit your entry'),
+          backgroundColor: background,
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 120),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: ink,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SUBMITTING TO',
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      quest.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${quest.entriesReceived}/${quest.maxEntries} official entries',
+                      style: const TextStyle(color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Required proof',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Every requirement must be included. Official entries cannot be edited or deleted.',
+                style: TextStyle(color: muted, height: 1.45),
+              ),
+              const SizedBox(height: 18),
+              for (final proof in quest.proofRequirements) ...[
+                _EvidenceInput(
+                  proof: proof,
+                  controller: proof == 'PHOTO' || proof == 'VIDEO'
+                      ? null
+                      : controllerFor(proof),
+                  selectedFile: mediaFiles[proof],
+                  onPick: proof == 'PHOTO' || proof == 'VIDEO'
+                      ? () => chooseMedia(proof)
+                      : null,
+                  onChanged: () => setState(() => errorMessage = null),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextField(
+                controller: captionController,
+                maxLength: 280,
+                minLines: 3,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Caption (optional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEAE5),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    errorMessage!,
+                    style: const TextStyle(color: Color(0xFF8F2E1E)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+          child: FilledButton.icon(
+            onPressed: submitting ? null : () => submit(quest),
+            style: FilledButton.styleFrom(
+              backgroundColor: accent,
+              foregroundColor: ink,
+              minimumSize: const Size.fromHeight(54),
+            ),
+            icon: submitting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      color: ink,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.upload_file_outlined),
+            label: Text(
+              submitting ? 'Securing your entry…' : 'Submit official entry',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EvidenceInput extends StatelessWidget {
+  const _EvidenceInput({
+    required this.proof,
+    required this.controller,
+    required this.selectedFile,
+    required this.onPick,
+    required this.onChanged,
+  });
+
+  final String proof;
+  final TextEditingController? controller;
+  final XFile? selectedFile;
+  final VoidCallback? onPick;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = proof.replaceAll('_', ' ').toLowerCase();
+    if (onPick != null) {
+      return InkWell(
+        onTap: onPick,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: selectedFile == null
+                ? Colors.white
+                : const Color(0xFFE9FFB0),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selectedFile == null ? line : const Color(0xFF9BC800),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                proof == 'PHOTO'
+                    ? Icons.add_photo_alternate_outlined
+                    : Icons.video_call_outlined,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      selectedFile?.name ?? 'Tap to choose or capture',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                selectedFile == null ? Icons.chevron_right : Icons.check_circle,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final hint = switch (proof) {
+      'LINK' => 'https://example.com/proof',
+      'LOCATION' => 'Venue, address, or coordinates',
+      'QR_CHECKPOINT' => 'Checkpoint code',
+      _ => 'Describe your proof',
+    };
+    return TextField(
+      controller: controller,
+      keyboardType: proof == 'LINK' ? TextInputType.url : TextInputType.text,
+      minLines: proof == 'TEXT' ? 3 : 1,
+      maxLines: proof == 'TEXT' ? 5 : 2,
+      onChanged: (_) => onChanged(),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        border: const OutlineInputBorder(),
+      ),
+    );
+  }
 }
 
 class AuthScreen extends ConsumerStatefulWidget {

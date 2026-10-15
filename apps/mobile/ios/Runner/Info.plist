@@ -37,6 +37,12 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>SideQuest uses the camera when you capture photo or video proof for a quest entry.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SideQuest uses the microphone when you record video proof for a quest entry.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>SideQuest uses your photo library when you choose photo or video proof for a quest entry.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
