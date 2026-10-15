@@ -50,7 +50,10 @@ Run the mobile app:
 
 ```bash
 cd apps/mobile
-flutter run
+flutter run \
+  --dart-define=API_URL=http://127.0.0.1:8080/api/v1 \
+  --dart-define=SUPABASE_URL=https://your-project.supabase.co \
+  --dart-define=SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 ```
 
 ## Verification
@@ -67,5 +70,7 @@ flutter test apps/mobile
 Copy the root `.env.example` for the API and `apps/web/.env.example` to `apps/web/.env.local` for the Next.js client. Provide a Supabase project URL and publishable key to activate email, Google, and Apple authentication. Provider dashboards must include the local and production callback URLs. Apple activation additionally requires Apple Developer identifiers and signing credentials.
 
 Wallet access is optional. The web app remains usable in a normal browser and detects Nimiq Pay at runtime before requesting wallet capabilities.
+
+Monetary quests deliberately stop at `AWAITING_FUNDING` until chain verification and payout signing are configured. Client wallet success alone never opens a quest or records a payout. See [verified reward funding readiness](docs/payment-readiness.md) for the required infrastructure and environment values.
 
 See [architecture](docs/architecture.md) and [technical validation](docs/technical-validation.md) for the current engineering decisions and external setup requirements.
