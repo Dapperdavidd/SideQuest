@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const background = Color(0xFFF8F8F5);
 const ink = Color(0xFF171917);
@@ -61,6 +62,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/quests/:id/submit',
         builder: (context, state) => SubmissionScreen(
+          questId: state.pathParameters['id']!,
+          initialQuest: state.extra as Quest?,
+        ),
+      ),
+      GoRoute(
+        path: '/quests/:id/review',
+        builder: (context, state) => ReviewQuestScreen(
           questId: state.pathParameters['id']!,
           initialQuest: state.extra as Quest?,
         ),
@@ -130,6 +138,7 @@ class Quest {
     required this.rewardAmountMinor,
     required this.rewardCurrency,
     required this.proofRequirements,
+    this.winnerSelectionMethod = 'FIRST_VALID',
     this.coverMediaUrl,
   });
 
@@ -150,6 +159,8 @@ class Quest {
     rewardCurrency: json['reward_currency'] as String?,
     proofRequirements: (json['proof_requirements'] as List<dynamic>)
         .cast<String>(),
+    winnerSelectionMethod:
+        json['winner_selection_method'] as String? ?? 'FIRST_VALID',
     coverMediaUrl: json['cover_media_url'] as String?,
   );
 
@@ -168,6 +179,7 @@ class Quest {
   final int? rewardAmountMinor;
   final String? rewardCurrency;
   final List<String> proofRequirements;
+  final String winnerSelectionMethod;
   final String? coverMediaUrl;
 
   String get image =>
@@ -261,6 +273,93 @@ class QuestRepository {
     );
     return response.data!;
   }
+
+  Future<List<CreatorEntry>> listCreatorEntries(
+    String questId,
+    String accessToken,
+  ) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/quests/$questId/entries',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!
+        .map((json) => CreatorEntry.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<void> reviewEntry(
+    String questId,
+    String entryId,
+    bool isValid,
+    String? reason,
+    String accessToken,
+  ) async {
+    await _dio.post<void>(
+      '/quests/$questId/entries/$entryId/review',
+      data: {'is_valid': isValid, 'reason': reason},
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
+  Future<Map<String, dynamic>> finalizeQuest(
+    String questId,
+    List<String> winnerEntryIds,
+    String accessToken,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests/$questId/finalize',
+      data: {'winner_entry_ids': winnerEntryIds},
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!;
+  }
+}
+
+class EntryEvidence {
+  const EntryEvidence({required this.proofType, required this.value});
+
+  factory EntryEvidence.fromJson(Map<String, dynamic> json) => EntryEvidence(
+    proofType: json['proof_type'] as String,
+    value: json['value'] as String,
+  );
+
+  final String proofType;
+  final String value;
+}
+
+class CreatorEntry {
+  const CreatorEntry({
+    required this.id,
+    required this.participantName,
+    required this.participantUsername,
+    required this.caption,
+    required this.submittedAt,
+    required this.reviewIsValid,
+    required this.reviewReason,
+    required this.evidence,
+  });
+
+  factory CreatorEntry.fromJson(Map<String, dynamic> json) => CreatorEntry(
+    id: json['id'] as String,
+    participantName: json['participant_display_name'] as String,
+    participantUsername: json['participant_username'] as String,
+    caption: json['caption'] as String?,
+    submittedAt: DateTime.parse(json['submitted_at'] as String).toLocal(),
+    reviewIsValid: json['review_is_valid'] as bool?,
+    reviewReason: json['review_reason'] as String?,
+    evidence: (json['evidence'] as List<dynamic>)
+        .map((item) => EntryEvidence.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false),
+  );
+
+  final String id;
+  final String participantName;
+  final String participantUsername;
+  final String? caption;
+  final DateTime submittedAt;
+  final bool? reviewIsValid;
+  final String? reviewReason;
+  final List<EntryEvidence> evidence;
 }
 
 class MyQuest {
@@ -326,6 +425,14 @@ final myQuestsProvider = FutureProvider.autoDispose<List<MyQuest>>((ref) {
   if (session == null) return const [];
   return ref.watch(questRepositoryProvider).listMyQuests(session.accessToken);
 });
+final creatorEntriesProvider = FutureProvider.autoDispose
+    .family<List<CreatorEntry>, String>((ref, questId) {
+      final session = currentSession;
+      if (session == null) return const [];
+      return ref
+          .watch(questRepositoryProvider)
+          .listCreatorEntries(questId, session.accessToken);
+    });
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -1587,6 +1694,635 @@ class _EvidenceInput extends StatelessWidget {
   }
 }
 
+class ReviewQuestScreen extends ConsumerStatefulWidget {
+  const ReviewQuestScreen({
+    required this.questId,
+    this.initialQuest,
+    super.key,
+  });
+
+  final String questId;
+  final Quest? initialQuest;
+
+  @override
+  ConsumerState<ReviewQuestScreen> createState() => _ReviewQuestScreenState();
+}
+
+class _ReviewQuestScreenState extends ConsumerState<ReviewQuestScreen> {
+  final reasons = <String, TextEditingController>{};
+  final selectedWinners = <String>{};
+  String? working;
+  String? errorMessage;
+
+  @override
+  void dispose() {
+    for (final controller in reasons.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController reasonFor(CreatorEntry entry) => reasons.putIfAbsent(
+    entry.id,
+    () => TextEditingController(text: entry.reviewReason ?? ''),
+  );
+
+  Future<void> review(CreatorEntry entry, bool isValid) async {
+    final session = currentSession;
+    if (session == null) return;
+    setState(() {
+      working = entry.id;
+      errorMessage = null;
+    });
+    try {
+      final reason = reasonFor(entry).text.trim();
+      await ref
+          .read(questRepositoryProvider)
+          .reviewEntry(
+            widget.questId,
+            entry.id,
+            isValid,
+            reason.isEmpty ? null : reason,
+            session.accessToken,
+          );
+      if (!isValid) selectedWinners.remove(entry.id);
+      ref.invalidate(creatorEntriesProvider(widget.questId));
+      ref.invalidate(myQuestsProvider);
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      setState(() {
+        errorMessage = data is Map<String, dynamic>
+            ? data['message'] as String? ?? 'The review could not be saved.'
+            : 'The review could not be saved.';
+      });
+    } finally {
+      if (mounted) setState(() => working = null);
+    }
+  }
+
+  Future<void> finalize(Quest quest, List<CreatorEntry> entries) async {
+    final session = currentSession;
+    if (session == null) return;
+    final validCount = entries
+        .where((entry) => entry.reviewIsValid == true)
+        .length;
+    final expectedWinners = math.min(quest.winnerCount, validCount);
+    if (quest.winnerSelectionMethod == 'BEST_SUBMISSION' &&
+        selectedWinners.length != expectedWinners) {
+      setState(() {
+        errorMessage =
+            'Select exactly $expectedWinners valid '
+            'winner${expectedWinners == 1 ? '' : 's'}.';
+      });
+      return;
+    }
+    setState(() {
+      working = 'finalize';
+      errorMessage = null;
+    });
+    try {
+      await ref
+          .read(questRepositoryProvider)
+          .finalizeQuest(
+            quest.id,
+            quest.winnerSelectionMethod == 'BEST_SUBMISSION'
+                ? selectedWinners.toList(growable: false)
+                : const [],
+            session.accessToken,
+          );
+      ref.invalidate(myQuestsProvider);
+      ref.invalidate(questsProvider);
+      ref.invalidate(questProvider(quest.id));
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          icon: const Icon(Icons.emoji_events_outlined),
+          title: const Text('Quest finalized'),
+          content: Text(
+            expectedWinners == 0
+                ? 'Every entry has been reviewed. No valid winner was available.'
+                : '$expectedWinners winner${expectedWinners == 1 ? '' : 's'} locked in. Reward settlement can now continue.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+      if (mounted) context.go('/my-quests');
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      setState(() {
+        errorMessage = data is Map<String, dynamic>
+            ? data['message'] as String? ?? 'The quest could not be finalized.'
+            : 'The quest could not be finalized.';
+      });
+    } finally {
+      if (mounted) setState(() => working = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context.go(
+            '/auth?next=${Uri.encodeComponent('/quests/${widget.questId}/review')}',
+          );
+        }
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+
+    final asyncQuest = widget.initialQuest == null
+        ? ref.watch(questProvider(widget.questId))
+        : AsyncData(widget.initialQuest!);
+    final asyncEntries = ref.watch(creatorEntriesProvider(widget.questId));
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Review entries'),
+        backgroundColor: background,
+        actions: [
+          IconButton(
+            onPressed: () =>
+                ref.invalidate(creatorEntriesProvider(widget.questId)),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: asyncQuest.when(
+          loading: () =>
+              const Center(child: CircularProgressIndicator(color: ink)),
+          error: (_, _) => Center(
+            child: _QuestFeedError(
+              onRetry: () => ref.invalidate(questProvider(widget.questId)),
+            ),
+          ),
+          data: (quest) => asyncEntries.when(
+            loading: () =>
+                const Center(child: CircularProgressIndicator(color: ink)),
+            error: (_, _) => Center(
+              child: _QuestFeedError(
+                onRetry: () =>
+                    ref.invalidate(creatorEntriesProvider(widget.questId)),
+              ),
+            ),
+            data: (entries) => _buildWorkspace(quest, entries),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspace(Quest quest, List<CreatorEntry> entries) {
+    final allReviewed =
+        entries.isNotEmpty &&
+        entries.every((entry) => entry.reviewIsValid != null);
+    final validEntries = entries
+        .where((entry) => entry.reviewIsValid == true)
+        .toList(growable: false);
+    final expectedWinners = math.min(quest.winnerCount, validEntries.length);
+    final selectionComplete =
+        quest.winnerSelectionMethod == 'FIRST_VALID' ||
+        selectedWinners.length == expectedWinners;
+
+    return RefreshIndicator(
+      color: ink,
+      onRefresh: () =>
+          ref.refresh(creatorEntriesProvider(widget.questId).future),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'CREATOR REVIEW',
+                      style: TextStyle(
+                        color: muted,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      quest.title,
+                      style: const TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -.8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE9FFB0),
+                  borderRadius: BorderRadius.circular(100),
+                ),
+                child: Text(
+                  '${entries.length}/${quest.maxEntries}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            quest.winnerSelectionMethod == 'FIRST_VALID'
+                ? 'Review every entry. Valid winners are calculated from the trusted submission order.'
+                : 'Review every entry, then select $expectedWinners valid winner${expectedWinners == 1 ? '' : 's'}.',
+            style: const TextStyle(color: muted, height: 1.45),
+          ),
+          if (errorMessage != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEAE5),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                errorMessage!,
+                style: const TextStyle(color: Color(0xFF8F2E1E)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 20),
+          if (entries.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(34),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: line),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.inbox_outlined, size: 38, color: muted),
+                  SizedBox(height: 12),
+                  Text(
+                    'No entries yet',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            )
+          else
+            for (var index = 0; index < entries.length; index++) ...[
+              _CreatorEntryCard(
+                entry: entries[index],
+                number: index + 1,
+                reasonController: reasonFor(entries[index]),
+                working: working == entries[index].id,
+                bestSubmission:
+                    quest.winnerSelectionMethod == 'BEST_SUBMISSION',
+                selected: selectedWinners.contains(entries[index].id),
+                onReview: (valid) => review(entries[index], valid),
+                onWinner: () => setState(() {
+                  if (selectedWinners.contains(entries[index].id)) {
+                    selectedWinners.remove(entries[index].id);
+                  } else if (selectedWinners.length < expectedWinners) {
+                    selectedWinners.add(entries[index].id);
+                  }
+                  errorMessage = null;
+                }),
+              ),
+              const SizedBox(height: 12),
+            ],
+          if (entries.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: line),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Finalize results',
+                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    allReviewed
+                        ? selectionComplete
+                              ? 'All decisions are ready to lock permanently.'
+                              : 'Select the published number of valid winners.'
+                        : 'Review every entry before finalizing.',
+                    style: const TextStyle(color: muted),
+                  ),
+                  const SizedBox(height: 15),
+                  FilledButton.icon(
+                    onPressed:
+                        allReviewed && selectionComplete && working == null
+                        ? () => finalize(quest, entries)
+                        : null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: ink,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    icon: working == 'finalize'
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.emoji_events_outlined),
+                    label: const Text('Finalize quest'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CreatorEntryCard extends StatelessWidget {
+  const _CreatorEntryCard({
+    required this.entry,
+    required this.number,
+    required this.reasonController,
+    required this.working,
+    required this.bestSubmission,
+    required this.selected,
+    required this.onReview,
+    required this.onWinner,
+  });
+
+  final CreatorEntry entry;
+  final int number;
+  final TextEditingController reasonController;
+  final bool working;
+  final bool bestSubmission;
+  final bool selected;
+  final ValueChanged<bool> onReview;
+  final VoidCallback onWinner;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(17),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: line),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'ENTRY $number',
+                    style: const TextStyle(
+                      color: muted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    entry.participantName,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    '@${entry.participantUsername} · ${_shortDate(entry.submittedAt)}',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            _ReviewStatus(value: entry.reviewIsValid),
+          ],
+        ),
+        if (entry.caption != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(entry.caption!, style: const TextStyle(height: 1.4)),
+          ),
+        ],
+        const SizedBox(height: 14),
+        for (final evidence in entry.evidence) ...[
+          _ReviewEvidence(evidence: evidence),
+          const SizedBox(height: 8),
+        ],
+        TextField(
+          controller: reasonController,
+          maxLength: 500,
+          decoration: const InputDecoration(
+            labelText: 'Review note (optional)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: working ? null : () => onReview(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE9FFB0),
+                  foregroundColor: ink,
+                ),
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Valid'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: working ? null : () => onReview(false),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFEAE5),
+                  foregroundColor: const Color(0xFF8F2E1E),
+                ),
+                icon: const Icon(Icons.close_rounded),
+                label: const Text('Invalid'),
+              ),
+            ),
+          ],
+        ),
+        if (bestSubmission && entry.reviewIsValid == true) ...[
+          const SizedBox(height: 9),
+          OutlinedButton.icon(
+            onPressed: onWinner,
+            style: OutlinedButton.styleFrom(
+              backgroundColor: selected ? ink : Colors.white,
+              foregroundColor: selected ? Colors.white : ink,
+              minimumSize: const Size.fromHeight(48),
+            ),
+            icon: const Icon(Icons.emoji_events_outlined),
+            label: Text(selected ? 'Selected as winner' : 'Select as winner'),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+class _ReviewStatus extends StatelessWidget {
+  const _ReviewStatus({required this.value});
+  final bool? value;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = value == null
+        ? 'Pending'
+        : value!
+        ? 'Valid'
+        : 'Invalid';
+    final color = value == null
+        ? const Color(0xFFF0F1ED)
+        : value!
+        ? const Color(0xFFE9FFB0)
+        : const Color(0xFFFFEAE5);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(100),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+}
+
+class _ReviewEvidence extends StatefulWidget {
+  const _ReviewEvidence({required this.evidence});
+  final EntryEvidence evidence;
+
+  @override
+  State<_ReviewEvidence> createState() => _ReviewEvidenceState();
+}
+
+class _ReviewEvidenceState extends State<_ReviewEvidence> {
+  Future<String>? signedUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.evidence.proofType == 'PHOTO' ||
+        widget.evidence.proofType == 'VIDEO') {
+      signedUrl = Supabase.instance.client.storage
+          .from('entry-media')
+          .createSignedUrl(widget.evidence.value, 600);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final proof = widget.evidence.proofType;
+    if (signedUrl != null) {
+      return FutureBuilder<String>(
+        future: signedUrl,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const LinearProgressIndicator(color: ink);
+          }
+          if (!snapshot.hasData) {
+            return const Text(
+              'Private proof could not be opened.',
+              style: TextStyle(color: muted),
+            );
+          }
+          if (proof == 'PHOTO') {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                snapshot.data!,
+                width: double.infinity,
+                height: 190,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox(
+                  height: 100,
+                  child: Center(child: Icon(Icons.broken_image_outlined)),
+                ),
+              ),
+            );
+          }
+          return OutlinedButton.icon(
+            onPressed: () => launchUrl(
+              Uri.parse(snapshot.data!),
+              mode: LaunchMode.externalApplication,
+            ),
+            icon: const Icon(Icons.play_circle_outline),
+            label: const Text('Open private video proof'),
+          );
+        },
+      );
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            proof.replaceAll('_', ' '),
+            style: const TextStyle(
+              color: muted,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(widget.evidence.value),
+        ],
+      ),
+    );
+  }
+}
+
 class AuthScreen extends ConsumerStatefulWidget {
   const AuthScreen({required this.next, super.key});
   final String next;
@@ -2760,8 +3496,17 @@ class _MyQuestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final open = quest.status == 'OPEN';
+    final reviewable =
+        quest.isCreator &&
+        (quest.status == 'CLOSED_FOR_REVIEW' ||
+            quest.status == 'REVIEWING' ||
+            (open && quest.deadline.isBefore(DateTime.now())));
     return InkWell(
-      onTap: open ? () => context.push('/quests/${quest.id}') : null,
+      onTap: reviewable
+          ? () => context.push('/quests/${quest.id}/review')
+          : open
+          ? () => context.push('/quests/${quest.id}')
+          : null,
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.all(18),
@@ -2850,7 +3595,17 @@ class _MyQuestCard extends StatelessWidget {
                   style: const TextStyle(color: muted, fontSize: 12),
                 ),
                 const Spacer(),
-                if (open) const Icon(Icons.chevron_right_rounded, color: muted),
+                if (reviewable)
+                  const Text(
+                    'Review entries',
+                    style: TextStyle(
+                      color: Color(0xFF698A00),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                if (open || reviewable)
+                  const Icon(Icons.chevron_right_rounded, color: muted),
               ],
             ),
           ],
