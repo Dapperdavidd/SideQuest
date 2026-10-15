@@ -70,6 +70,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/my-quests',
         builder: (context, state) => const MyQuestsScreen(),
       ),
+      GoRoute(
+        path: '/create',
+        builder: (context, state) => const CreateQuestScreen(),
+      ),
     ],
   );
 });
@@ -215,6 +219,26 @@ class QuestRepository {
     return response.data!
         .map((json) => MyQuest.fromJson(json as Map<String, dynamic>))
         .toList(growable: false);
+  }
+
+  Future<Quest> createQuest(
+    Map<String, dynamic> payload,
+    String accessToken,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests',
+      data: payload,
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return Quest.fromJson(response.data!);
+  }
+
+  Future<Quest> publishQuest(String id, String accessToken) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests/$id/publish',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return Quest.fromJson(response.data!);
   }
 }
 
@@ -446,7 +470,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             );
             return;
           }
-          context.push('/auth?next=/discover');
+          context.push(session == null ? '/auth?next=/create' : '/create');
         },
         destinations: const [
           NavigationDestination(
@@ -1248,6 +1272,768 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 }
 
+class CreateQuestScreen extends ConsumerStatefulWidget {
+  const CreateQuestScreen({super.key});
+
+  @override
+  ConsumerState<CreateQuestScreen> createState() => _CreateQuestScreenState();
+}
+
+class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
+  final titleController = TextEditingController();
+  final descriptionController = TextEditingController();
+  final criteriaController = TextEditingController();
+  final rewardController = TextEditingController(text: '10');
+  int step = 0;
+  String questType = 'FRIENDS';
+  DateTime deadline = DateTime.now().add(const Duration(days: 7));
+  bool isGroup = false;
+  int groupSize = 2;
+  int maxEntries = 5;
+  final proofRequirements = <String>{'PHOTO'};
+  String selectionMethod = 'FIRST_VALID';
+  int winnerCount = 1;
+  bool rewardEnabled = false;
+  String settlementAsset = 'NIM';
+  bool publishing = false;
+  String? errorMessage;
+
+  @override
+  void dispose() {
+    titleController.dispose();
+    descriptionController.dispose();
+    criteriaController.dispose();
+    rewardController.dispose();
+    super.dispose();
+  }
+
+  bool get currentStepValid => switch (step) {
+    0 =>
+      titleController.text.trim().length >= 3 &&
+          descriptionController.text.trim().isNotEmpty &&
+          deadline.isAfter(DateTime.now()),
+    1 => proofRequirements.isNotEmpty,
+    2 =>
+      selectionMethod == 'FIRST_VALID' ||
+          criteriaController.text.trim().length >= 3,
+    _ => true,
+  };
+
+  Future<void> chooseDeadline() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: deadline,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(deadline),
+    );
+    if (time == null) return;
+    setState(() {
+      deadline = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+    });
+  }
+
+  Future<void> publish() async {
+    final session = currentSession;
+    if (session == null) {
+      context.go('/auth?next=/create');
+      return;
+    }
+    final rewardAmount = double.tryParse(rewardController.text.trim());
+    if (rewardEnabled && (rewardAmount == null || rewardAmount <= 0)) {
+      setState(() => errorMessage = 'Enter a reward greater than zero.');
+      return;
+    }
+    setState(() {
+      publishing = true;
+      errorMessage = null;
+    });
+    try {
+      final repository = ref.read(questRepositoryProvider);
+      final created = await repository.createQuest({
+        'title': titleController.text.trim(),
+        'description': descriptionController.text.trim(),
+        'cover_media_url': null,
+        'quest_type': questType,
+        'visibility': 'PUBLIC',
+        'is_group_challenge': isGroup,
+        'required_group_size': isGroup ? groupSize : null,
+        'max_entries': maxEntries,
+        'winner_count': winnerCount,
+        'winner_selection_method': selectionMethod,
+        'proof_requirements': proofRequirements.toList(growable: false),
+        'judging_criteria': selectionMethod == 'BEST_SUBMISSION'
+            ? criteriaController.text.trim()
+            : null,
+        'reward_enabled': rewardEnabled,
+        'reward_amount_minor': rewardEnabled
+            ? (rewardAmount! * 100).round()
+            : null,
+        'reward_currency': rewardEnabled ? 'USD' : null,
+        'settlement_asset': rewardEnabled ? settlementAsset : null,
+        'deadline': deadline.toUtc().toIso8601String(),
+      }, session.accessToken);
+      final published = await repository.publishQuest(
+        created.id,
+        session.accessToken,
+      );
+      ref.invalidate(myQuestsProvider);
+      ref.invalidate(questsProvider);
+      if (!mounted) return;
+      if (published.status == 'OPEN') {
+        context.go('/quests/${published.id}', extra: published);
+      } else {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            title: const Text('Quest saved'),
+            content: const Text(
+              'Your reward quest is awaiting funding verification. It will stay private until the reward pool is confirmed.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('View my quests'),
+              ),
+            ],
+          ),
+        );
+        if (mounted) context.go('/my-quests');
+      }
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      setState(() {
+        errorMessage = data is Map<String, dynamic>
+            ? data['message'] as String? ?? 'The quest could not be published.'
+            : 'The quest could not be published.';
+      });
+    } finally {
+      if (mounted) setState(() => publishing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go('/auth?next=/create');
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+
+    const stepNames = ['Quest', 'Proof', 'Winners', 'Review'];
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Create a quest'),
+        backgroundColor: background,
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+          children: [
+            Row(
+              children: List.generate(stepNames.length, (index) {
+                return Expanded(
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          if (index > 0)
+                            Expanded(
+                              child: Divider(color: index <= step ? ink : line),
+                            ),
+                          CircleAvatar(
+                            radius: 15,
+                            backgroundColor: index <= step ? accent : line,
+                            foregroundColor: ink,
+                            child: Text(
+                              '${index + 1}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (index < stepNames.length - 1)
+                            Expanded(
+                              child: Divider(color: index < step ? ink : line),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        stepNames[index],
+                        style: TextStyle(
+                          color: index == step ? ink : muted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 28),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: switch (step) {
+                0 => _buildQuestStep(),
+                1 => _buildProofStep(),
+                2 => _buildWinnerStep(),
+                _ => _buildReviewStep(),
+              },
+            ),
+            if (errorMessage != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEAE5),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  errorMessage!,
+                  style: const TextStyle(color: Color(0xFF8F2E1E)),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+        child: Row(
+          children: [
+            if (step > 0) ...[
+              OutlinedButton(
+                onPressed: publishing
+                    ? null
+                    : () => setState(() {
+                        step -= 1;
+                        errorMessage = null;
+                      }),
+                child: const Text('Back'),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: publishing || !currentStepValid
+                    ? null
+                    : () {
+                        if (step < 3) {
+                          setState(() {
+                            step += 1;
+                            errorMessage = null;
+                          });
+                        } else {
+                          publish();
+                        }
+                      },
+                style: FilledButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor: ink,
+                  minimumSize: const Size.fromHeight(54),
+                ),
+                icon: publishing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          color: ink,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Icon(
+                        step == 3
+                            ? Icons.rocket_launch_outlined
+                            : Icons.arrow_forward_rounded,
+                      ),
+                label: Text(
+                  publishing
+                      ? 'Publishing…'
+                      : step == 3
+                      ? rewardEnabled
+                            ? 'Save for funding'
+                            : 'Publish quest'
+                      : 'Continue',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuestStep() => Column(
+    key: const ValueKey(0),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const _StepHeading(
+        title: "What's the side quest?",
+        subtitle: 'Make it sound like something people would want to try.',
+      ),
+      const SizedBox(height: 22),
+      TextField(
+        controller: titleController,
+        maxLength: 100,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(
+          labelText: 'Quest title',
+          border: OutlineInputBorder(),
+          hintText: 'Take the best sunset photo before 6 PM',
+        ),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: descriptionController,
+        maxLength: 2000,
+        minLines: 4,
+        maxLines: 6,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(
+          labelText: 'What should people do?',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _PickerTile(
+        icon: Icons.calendar_today_outlined,
+        title: 'Submission deadline',
+        value:
+            '${_shortDate(deadline)} · ${TimeOfDay.fromDateTime(deadline).format(context)}',
+        onTap: chooseDeadline,
+      ),
+      const SizedBox(height: 20),
+      const Text('Quest type', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 10),
+      SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'FRIENDS', label: Text('Friends')),
+          ButtonSegment(value: 'BOUNTY', label: Text('Bounty')),
+          ButtonSegment(value: 'EXPLORE', label: Text('Explore')),
+        ],
+        selected: {questType},
+        onSelectionChanged: (value) => setState(() => questType = value.first),
+      ),
+    ],
+  );
+
+  Widget _buildProofStep() {
+    const proofs = {
+      'PHOTO': 'Photo',
+      'VIDEO': 'Video',
+      'LINK': 'Link',
+      'TEXT': 'Text',
+      'QR_CHECKPOINT': 'QR checkpoint',
+      'LOCATION': 'Location',
+    };
+    return Column(
+      key: const ValueKey(1),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _StepHeading(
+          title: 'Who can take part?',
+          subtitle: 'Set the capacity and evidence required for a valid entry.',
+        ),
+        const SizedBox(height: 22),
+        SwitchListTile.adaptive(
+          value: isGroup,
+          onChanged: (value) => setState(() => isGroup = value),
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Group challenge',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: const Text('One representative submits for the group.'),
+        ),
+        if (isGroup) ...[
+          const SizedBox(height: 10),
+          const Text('Required group size'),
+          Slider(
+            value: groupSize.toDouble(),
+            min: 2,
+            max: 10,
+            divisions: 8,
+            label: '$groupSize people',
+            onChanged: (value) => setState(() => groupSize = value.round()),
+          ),
+        ],
+        const SizedBox(height: 16),
+        const Text(
+          'Maximum official entries',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 3, label: Text('3')),
+            ButtonSegment(value: 5, label: Text('5')),
+            ButtonSegment(value: 10, label: Text('10')),
+          ],
+          selected: {maxEntries},
+          onSelectionChanged: (value) => setState(() {
+            maxEntries = value.first;
+            winnerCount = math.min(winnerCount, maxEntries);
+          }),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Required proof',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: proofs.entries
+              .map((entry) {
+                final selected = proofRequirements.contains(entry.key);
+                return FilterChip(
+                  selected: selected,
+                  showCheckmark: true,
+                  selectedColor: const Color(0xFFE9FFB0),
+                  label: Text(entry.value),
+                  onSelected: (_) => setState(() {
+                    if (selected) {
+                      proofRequirements.remove(entry.key);
+                    } else {
+                      proofRequirements.add(entry.key);
+                    }
+                  }),
+                );
+              })
+              .toList(growable: false),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWinnerStep() => Column(
+    key: const ValueKey(2),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const _StepHeading(
+        title: 'How are winners picked?',
+        subtitle:
+            'Publish the method now so every participant knows the rules.',
+      ),
+      const SizedBox(height: 22),
+      _SelectionCard(
+        selected: selectionMethod == 'FIRST_VALID',
+        title: 'First valid',
+        subtitle: 'The earliest qualifying entries win.',
+        onTap: () => setState(() => selectionMethod = 'FIRST_VALID'),
+      ),
+      const SizedBox(height: 10),
+      _SelectionCard(
+        selected: selectionMethod == 'BEST_SUBMISSION',
+        title: 'Best submission',
+        subtitle: 'Review valid entries against published criteria.',
+        onTap: () => setState(() => selectionMethod = 'BEST_SUBMISSION'),
+      ),
+      if (selectionMethod == 'BEST_SUBMISSION') ...[
+        const SizedBox(height: 14),
+        TextField(
+          controller: criteriaController,
+          maxLength: 500,
+          minLines: 3,
+          maxLines: 5,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            labelText: 'Judging criteria',
+            border: OutlineInputBorder(),
+          ),
+        ),
+      ],
+      const SizedBox(height: 18),
+      const Text(
+        'Number of winners',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 10),
+      SegmentedButton<int>(
+        segments: [
+          for (final count in [1, 2, 3].where((value) => value <= maxEntries))
+            ButtonSegment(value: count, label: Text('$count')),
+        ],
+        selected: {winnerCount},
+        onSelectionChanged: (value) =>
+            setState(() => winnerCount = value.first),
+      ),
+      const SizedBox(height: 24),
+      SwitchListTile.adaptive(
+        value: rewardEnabled,
+        onChanged: (value) => setState(() => rewardEnabled = value),
+        contentPadding: EdgeInsets.zero,
+        title: const Text(
+          'Monetary reward',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: const Text(
+          'Reward quests remain private until funding is verified.',
+        ),
+      ),
+      if (rewardEnabled) ...[
+        const SizedBox(height: 12),
+        TextField(
+          controller: rewardController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'USD per winner',
+            prefixText: r'$ ',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: settlementAsset,
+          decoration: const InputDecoration(
+            labelText: 'Settlement asset',
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'NIM', child: Text('NIM · testnet')),
+            DropdownMenuItem(value: 'USDT', child: Text('USDT · Polygon Amoy')),
+          ],
+          onChanged: (value) =>
+              setState(() => settlementAsset = value ?? 'NIM'),
+        ),
+      ],
+    ],
+  );
+
+  Widget _buildReviewStep() {
+    final reward = double.tryParse(rewardController.text.trim()) ?? 0;
+    final rows = <(String, String)>[
+      ('Quest', titleController.text.trim()),
+      ('Type', questType.toLowerCase()),
+      ('Deadline', _shortDate(deadline)),
+      ('Participation', isGroup ? 'Group of $groupSize' : 'Individual'),
+      ('Entries', '$maxEntries maximum'),
+      (
+        'Winners',
+        '$winnerCount · ${selectionMethod == 'FIRST_VALID' ? 'first valid' : 'best submission'}',
+      ),
+      (
+        'Proof',
+        proofRequirements
+            .map((value) => value.replaceAll('_', ' ').toLowerCase())
+            .join(', '),
+      ),
+      (
+        'Reward',
+        rewardEnabled
+            ? '\$${reward.toStringAsFixed(2)} each · $settlementAsset'
+            : 'Just for fun',
+      ),
+    ];
+    return Column(
+      key: const ValueKey(3),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _StepHeading(
+          title: 'Ready to publish?',
+          subtitle: 'Review the permanent rules before the quest goes live.',
+        ),
+        const SizedBox(height: 22),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: line),
+          ),
+          child: Column(
+            children: [
+              for (var index = 0; index < rows.length; index++) ...[
+                Padding(
+                  padding: const EdgeInsets.all(15),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 92,
+                        child: Text(
+                          rows[index].$1,
+                          style: const TextStyle(color: muted, fontSize: 13),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          rows[index].$2,
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (index < rows.length - 1) const Divider(height: 1),
+              ],
+            ],
+          ),
+        ),
+        if (rewardEnabled) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF5D9),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Text(
+              'Publishing saves this quest as Awaiting Funding. It will not appear as open until settlement is verified.',
+              style: TextStyle(color: Color(0xFF72500A), height: 1.45),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StepHeading extends StatelessWidget {
+  const _StepHeading({required this.title, required this.subtitle});
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          fontSize: 28,
+          height: 1.08,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -1,
+        ),
+      ),
+      const SizedBox(height: 8),
+      Text(subtitle, style: const TextStyle(color: muted, height: 1.45)),
+    ],
+  );
+}
+
+class _PickerTile extends StatelessWidget {
+  const _PickerTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(14),
+    child: Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: muted),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(color: muted, fontSize: 12)),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: muted),
+        ],
+      ),
+    ),
+  );
+}
+
+class _SelectionCard extends StatelessWidget {
+  const _SelectionCard({
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+  final bool selected;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(16),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: selected ? const Color(0xFFE9FFB0) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: selected ? const Color(0xFF9BC800) : line),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            selected ? Icons.radio_button_checked : Icons.radio_button_off,
+            color: selected ? ink : muted,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class MyQuestsScreen extends ConsumerStatefulWidget {
   const MyQuestsScreen({super.key});
 
@@ -1372,7 +2158,7 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/auth?next=/discover'),
+        onPressed: () => context.push('/create'),
         backgroundColor: accent,
         foregroundColor: ink,
         icon: const Icon(Icons.add_rounded),
@@ -1386,7 +2172,7 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
         indicatorColor: accent,
         onDestinationSelected: (index) {
           if (index == 0) context.go('/discover');
-          if (index == 2) context.push('/auth?next=/discover');
+          if (index == 2) context.push('/create');
           if (index == 3) context.push('/profile');
         },
         destinations: const [
