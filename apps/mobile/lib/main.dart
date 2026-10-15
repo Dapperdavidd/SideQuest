@@ -66,6 +66,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/profile',
         builder: (context, state) => const ProfileScreen(),
       ),
+      GoRoute(
+        path: '/my-quests',
+        builder: (context, state) => const MyQuestsScreen(),
+      ),
     ],
   );
 });
@@ -202,6 +206,65 @@ class QuestRepository {
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
   }
+
+  Future<List<MyQuest>> listMyQuests(String accessToken) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/users/me/quests',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!
+        .map((json) => MyQuest.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+}
+
+class MyQuest {
+  const MyQuest({
+    required this.id,
+    required this.title,
+    required this.questType,
+    required this.status,
+    required this.relationship,
+    required this.deadline,
+    required this.entriesReceived,
+    required this.maxEntries,
+    required this.participantsJoined,
+    required this.rewardEnabled,
+    required this.rewardAmountMinor,
+    required this.rewardCurrency,
+  });
+
+  factory MyQuest.fromJson(Map<String, dynamic> json) => MyQuest(
+    id: json['id'] as String,
+    title: json['title'] as String,
+    questType: json['quest_type'] as String,
+    status: json['status'] as String,
+    relationship: json['relationship'] as String,
+    deadline: DateTime.parse(json['deadline'] as String).toLocal(),
+    entriesReceived: (json['entries_received'] as num).toInt(),
+    maxEntries: (json['max_entries'] as num).toInt(),
+    participantsJoined: (json['participants_joined'] as num).toInt(),
+    rewardEnabled: json['reward_enabled'] as bool,
+    rewardAmountMinor: (json['reward_amount_minor'] as num?)?.toInt(),
+    rewardCurrency: json['reward_currency'] as String?,
+  );
+
+  final String id;
+  final String title;
+  final String questType;
+  final String status;
+  final String relationship;
+  final DateTime deadline;
+  final int entriesReceived;
+  final int maxEntries;
+  final int participantsJoined;
+  final bool rewardEnabled;
+  final int? rewardAmountMinor;
+  final String? rewardCurrency;
+
+  bool get isCreator => relationship == 'CREATOR';
+  bool get isCompleted =>
+      const {'COMPLETED', 'CANCELLED', 'EXPIRED'}.contains(status);
 }
 
 final questRepositoryProvider = Provider<QuestRepository>(
@@ -213,6 +276,11 @@ final questsProvider = FutureProvider.autoDispose<List<Quest>>(
 final questProvider = FutureProvider.autoDispose.family<Quest, String>(
   (ref, id) => ref.watch(questRepositoryProvider).getQuest(id),
 );
+final myQuestsProvider = FutureProvider.autoDispose<List<MyQuest>>((ref) {
+  final session = currentSession;
+  if (session == null) return const [];
+  return ref.watch(questRepositoryProvider).listMyQuests(session.accessToken);
+});
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -370,6 +438,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           if (index == 0) return;
           if (index == 3) {
             context.push(session == null ? '/auth?next=/profile' : '/profile');
+            return;
+          }
+          if (index == 1) {
+            context.push(
+              session == null ? '/auth?next=/my-quests' : '/my-quests',
+            );
             return;
           }
           context.push('/auth?next=/discover');
@@ -1172,6 +1246,354 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       ),
     );
   }
+}
+
+class MyQuestsScreen extends ConsumerStatefulWidget {
+  const MyQuestsScreen({super.key});
+
+  @override
+  ConsumerState<MyQuestsScreen> createState() => _MyQuestsScreenState();
+}
+
+class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
+  int selectedTab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go('/auth?next=/my-quests');
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+
+    final asyncQuests = ref.watch(myQuestsProvider);
+    const labels = ['Active', 'Created', 'Joined', 'Completed'];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My quests'),
+        backgroundColor: background,
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => ref.invalidate(myQuestsProvider),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: ink,
+          onRefresh: () => ref.refresh(myQuestsProvider.future),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Keep every commitment in view.',
+                        style: TextStyle(color: muted),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        height: 40,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: labels.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) => ChoiceChip(
+                            selected: selectedTab == index,
+                            onSelected: (_) =>
+                                setState(() => selectedTab = index),
+                            showCheckmark: false,
+                            selectedColor: accent,
+                            side: const BorderSide(color: line),
+                            label: Text(labels[index]),
+                            labelStyle: const TextStyle(
+                              color: ink,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              asyncQuests.when(
+                loading: () => const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(child: CircularProgressIndicator(color: ink)),
+                ),
+                error: (_, _) => SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _QuestFeedError(
+                    onRetry: () => ref.invalidate(myQuestsProvider),
+                  ),
+                ),
+                data: (quests) {
+                  final filtered = quests
+                      .where((quest) {
+                        return switch (selectedTab) {
+                          1 => quest.isCreator,
+                          2 => !quest.isCreator,
+                          3 => quest.isCompleted,
+                          _ => !quest.isCompleted,
+                        };
+                      })
+                      .toList(growable: false);
+                  if (filtered.isEmpty) {
+                    return SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _MyQuestsEmpty(label: labels[selectedTab]),
+                    );
+                  }
+                  return SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
+                    sliver: SliverList.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) =>
+                          _MyQuestCard(quest: filtered[index]),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/auth?next=/discover'),
+        backgroundColor: accent,
+        foregroundColor: ink,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text(
+          'Create quest',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: 1,
+        indicatorColor: accent,
+        onDestinationSelected: (index) {
+          if (index == 0) context.go('/discover');
+          if (index == 2) context.push('/auth?next=/discover');
+          if (index == 3) context.push('/profile');
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.explore_outlined),
+            label: 'Discover',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.emoji_events_outlined),
+            selectedIcon: Icon(Icons.emoji_events),
+            label: 'Quests',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.add_circle_outline),
+            label: 'Create',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MyQuestsEmpty extends StatelessWidget {
+  const _MyQuestsEmpty({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircleAvatar(
+            radius: 28,
+            backgroundColor: Color(0xFFE9FFB0),
+            foregroundColor: ink,
+            child: Icon(Icons.flag_outlined),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No ${label.toLowerCase()} quests',
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            'Join a challenge or create one for the community.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, height: 1.45),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _MyQuestCard extends StatelessWidget {
+  const _MyQuestCard({required this.quest});
+  final MyQuest quest;
+
+  @override
+  Widget build(BuildContext context) {
+    final open = quest.status == 'OPEN';
+    return InkWell(
+      onTap: open ? () => context.push('/quests/${quest.id}') : null,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        quest.isCreator ? 'CREATED BY YOU' : 'JOINED',
+                        style: const TextStyle(
+                          color: muted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        quest.title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: open
+                        ? const Color(0xFFE9FFB0)
+                        : const Color(0xFFF0F1ED),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Text(
+                    quest.status.replaceAll('_', ' '),
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                _MiniStat(
+                  value: '${quest.entriesReceived}/${quest.maxEntries}',
+                  label: 'entries',
+                ),
+                const SizedBox(width: 8),
+                _MiniStat(
+                  value: '${quest.participantsJoined}',
+                  label: 'joined',
+                ),
+                const SizedBox(width: 8),
+                _MiniStat(
+                  value: quest.questType.characters.first,
+                  label: 'type',
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded, size: 15, color: muted),
+                const SizedBox(width: 5),
+                Text(
+                  _shortDate(quest.deadline),
+                  style: const TextStyle(color: muted, fontSize: 12),
+                ),
+                const Spacer(),
+                if (open) const Icon(Icons.chevron_right_rounded, color: muted),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({required this.value, required this.label});
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: muted, fontSize: 10)),
+        ],
+      ),
+    ),
+  );
+}
+
+String _shortDate(DateTime value) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[value.month - 1]} ${value.day}, ${value.year}';
 }
 
 class ProfileScreen extends ConsumerWidget {
