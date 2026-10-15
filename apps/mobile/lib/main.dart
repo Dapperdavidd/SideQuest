@@ -313,6 +313,50 @@ class QuestRepository {
     );
     return response.data!;
   }
+
+  Future<UserProfile> getMyProfile(String accessToken) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/users/me',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return UserProfile.fromJson(response.data!);
+  }
+
+  Future<UserProfile> updateMyProfile(
+    Map<String, dynamic> changes,
+    String accessToken,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/users/me',
+      data: changes,
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return UserProfile.fromJson(response.data!);
+  }
+}
+
+class UserProfile {
+  const UserProfile({
+    required this.id,
+    required this.username,
+    required this.displayName,
+    required this.bio,
+    required this.avatarUrl,
+  });
+
+  factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
+    id: json['id'] as String,
+    username: json['username'] as String,
+    displayName: json['display_name'] as String,
+    bio: json['bio'] as String?,
+    avatarUrl: json['avatar_url'] as String?,
+  );
+
+  final String id;
+  final String username;
+  final String displayName;
+  final String? bio;
+  final String? avatarUrl;
 }
 
 class EntryEvidence {
@@ -433,6 +477,11 @@ final creatorEntriesProvider = FutureProvider.autoDispose
           .watch(questRepositoryProvider)
           .listCreatorEntries(questId, session.accessToken);
     });
+final myProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) {
+  final session = currentSession;
+  if (session == null) throw StateError('Authentication required');
+  return ref.watch(questRepositoryProvider).getMyProfile(session.accessToken);
+});
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -3657,11 +3706,91 @@ String _shortDate(DateTime value) {
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
 }
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  final usernameController = TextEditingController();
+  final nameController = TextEditingController();
+  final bioController = TextEditingController();
+  String? loadedProfileId;
+  bool editing = false;
+  bool saving = false;
+  String? errorMessage;
+
+  @override
+  void dispose() {
+    usernameController.dispose();
+    nameController.dispose();
+    bioController.dispose();
+    super.dispose();
+  }
+
+  void loadControllers(UserProfile profile) {
+    if (loadedProfileId == profile.id) return;
+    loadedProfileId = profile.id;
+    usernameController.text = profile.username;
+    nameController.text = profile.displayName;
+    bioController.text = profile.bio ?? '';
+  }
+
+  Future<void> save() async {
+    final session = currentSession;
+    if (session == null) return;
+    final username = usernameController.text.trim().toLowerCase();
+    final displayName = nameController.text.trim();
+    if (!RegExp(r'^[a-z0-9_]{3,30}$').hasMatch(username)) {
+      setState(() {
+        errorMessage =
+            'Username needs 3–30 lowercase letters, numbers, or underscores.';
+      });
+      return;
+    }
+    if (displayName.isEmpty || displayName.characters.length > 80) {
+      setState(() => errorMessage = 'Display name needs 1–80 characters.');
+      return;
+    }
+    if (bioController.text.characters.length > 240) {
+      setState(() => errorMessage = 'Bio cannot exceed 240 characters.');
+      return;
+    }
+
+    setState(() {
+      saving = true;
+      errorMessage = null;
+    });
+    try {
+      final updated = await ref.read(questRepositoryProvider).updateMyProfile({
+        'username': username,
+        'display_name': displayName,
+        'bio': bioController.text.trim(),
+      }, session.accessToken);
+      loadedProfileId = null;
+      ref.invalidate(myProfileProvider);
+      if (mounted) {
+        loadControllers(updated);
+        setState(() => editing = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Profile updated.')));
+      }
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      setState(() {
+        errorMessage = data is Map<String, dynamic>
+            ? data['message'] as String? ?? 'Your profile could not be updated.'
+            : 'Your profile could not be updated.';
+      });
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.watch(authStateProvider);
     final session = currentSession;
     if (session == null) {
@@ -3672,59 +3801,270 @@ class ProfileScreen extends ConsumerWidget {
         body: Center(child: CircularProgressIndicator(color: ink)),
       );
     }
-    final metadata = session.user.userMetadata ?? const <String, dynamic>{};
-    final name =
-        (metadata['full_name'] as String?) ??
-        (metadata['name'] as String?) ??
-        session.user.email?.split('@').first ??
-        'Explorer';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile'), backgroundColor: background),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        backgroundColor: background,
+        actions: [
+          if (!editing)
+            IconButton(
+              tooltip: 'Edit profile',
+              onPressed: () => setState(() => editing = true),
+              icon: const Icon(Icons.edit_outlined),
+            ),
+        ],
+      ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            CircleAvatar(
-              radius: 46,
-              backgroundColor: ink,
-              foregroundColor: accent,
-              child: Text(
-                name.characters.first.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
+        child: ref
+            .watch(myProfileProvider)
+            .when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator(color: ink)),
+              error: (_, _) => Center(
+                child: _QuestFeedError(
+                  onRetry: () => ref.invalidate(myProfileProvider),
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              name,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              session.user.email ?? '',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: muted),
-            ),
-            const SizedBox(height: 32),
-            OutlinedButton.icon(
-              onPressed: () async {
-                await Supabase.instance.client.auth.signOut();
-                if (context.mounted) context.go('/discover');
+              data: (profile) {
+                loadControllers(profile);
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 40),
+                  children: [
+                    _ProfileAvatar(profile: profile),
+                    const SizedBox(height: 18),
+                    if (editing)
+                      _buildEditor(profile)
+                    else
+                      _buildProfile(profile, session.user.email ?? ''),
+                    const SizedBox(height: 28),
+                    OutlinedButton.icon(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              await Supabase.instance.client.auth.signOut();
+                              ref.invalidate(myProfileProvider);
+                              ref.invalidate(myQuestsProvider);
+                              if (context.mounted) context.go('/discover');
+                            },
+                      icon: const Icon(Icons.logout_rounded),
+                      label: const Text('Sign out'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: ink,
+                        minimumSize: const Size.fromHeight(52),
+                      ),
+                    ),
+                  ],
+                );
               },
-              icon: const Icon(Icons.logout_rounded),
-              label: const Text('Sign out'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: ink,
-                minimumSize: const Size.fromHeight(52),
-              ),
             ),
-          ],
-        ),
       ),
     );
   }
+
+  Widget _buildProfile(UserProfile profile, String email) {
+    final quests = ref
+        .watch(myQuestsProvider)
+        .maybeWhen(data: (value) => value, orElse: () => const <MyQuest>[]);
+    final created = quests.where((quest) => quest.isCreator).length;
+    final active = quests.where((quest) => !quest.isCompleted).length;
+    final completed = quests.where((quest) => quest.isCompleted).length;
+    return Column(
+      children: [
+        Text(
+          profile.displayName,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -.8,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          '@${profile.username}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: muted, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 3),
+        Text(email, style: const TextStyle(color: muted, fontSize: 12)),
+        if (profile.bio?.isNotEmpty ?? false) ...[
+          const SizedBox(height: 14),
+          Text(
+            profile.bio!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(height: 1.45),
+          ),
+        ],
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            _ProfileStat(value: '$completed', label: 'Completed'),
+            const SizedBox(width: 8),
+            _ProfileStat(value: '$active', label: 'Active'),
+            const SizedBox(width: 8),
+            _ProfileStat(value: '$created', label: 'Created'),
+          ],
+        ),
+        const SizedBox(height: 22),
+        FilledButton.icon(
+          onPressed: () => context.push('/my-quests'),
+          style: FilledButton.styleFrom(
+            backgroundColor: accent,
+            foregroundColor: ink,
+            minimumSize: const Size.fromHeight(52),
+          ),
+          icon: const Icon(Icons.emoji_events_outlined),
+          label: const Text('Manage my quests'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditor(UserProfile profile) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      TextField(
+        controller: nameController,
+        maxLength: 80,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(
+          labelText: 'Display name',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 10),
+      TextField(
+        controller: usernameController,
+        maxLength: 30,
+        autocorrect: false,
+        textCapitalization: TextCapitalization.none,
+        decoration: const InputDecoration(
+          labelText: 'Username',
+          prefixText: '@',
+          helperText: 'Lowercase letters, numbers, and underscores only.',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 10),
+      TextField(
+        controller: bioController,
+        maxLength: 240,
+        minLines: 3,
+        maxLines: 5,
+        decoration: const InputDecoration(
+          labelText: 'Bio',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      if (errorMessage != null) ...[
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFEAE5),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            errorMessage!,
+            style: const TextStyle(color: Color(0xFF8F2E1E)),
+          ),
+        ),
+      ],
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          OutlinedButton(
+            onPressed: saving
+                ? null
+                : () {
+                    loadedProfileId = null;
+                    loadControllers(profile);
+                    setState(() {
+                      editing = false;
+                      errorMessage = null;
+                    });
+                  },
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: saving ? null : save,
+              style: FilledButton.styleFrom(
+                backgroundColor: ink,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(50),
+              ),
+              icon: saving
+                  ? const SizedBox.square(
+                      dimension: 17,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: const Text('Save profile'),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({required this.profile});
+  final UserProfile profile;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: CircleAvatar(
+      radius: 48,
+      backgroundColor: ink,
+      foregroundImage: profile.avatarUrl == null
+          ? null
+          : NetworkImage(profile.avatarUrl!),
+      child: profile.avatarUrl == null
+          ? Text(
+              profile.displayName.characters.first.toUpperCase(),
+              style: const TextStyle(
+                color: accent,
+                fontSize: 31,
+                fontWeight: FontWeight.w800,
+              ),
+            )
+          : null,
+    ),
+  );
+}
+
+class _ProfileStat extends StatelessWidget {
+  const _ProfileStat({required this.value, required this.label});
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: line),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          Text(label, style: const TextStyle(color: muted, fontSize: 10)),
+        ],
+      ),
+    ),
+  );
 }
