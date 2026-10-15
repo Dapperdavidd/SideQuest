@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -24,9 +25,14 @@ const supabasePublishableKey = String.fromEnvironment(
 const mobileAuthRedirect = 'app.sidequest://login-callback/';
 final supabaseConfigured =
     supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty;
+String initialAppLocation = '/discover';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final preferences = await SharedPreferences.getInstance();
+  if (!(preferences.getBool('onboarding_complete') ?? false)) {
+    initialAppLocation = '/onboarding';
+  }
   if (supabaseConfigured) {
     await Supabase.initialize(
       url: supabaseUrl,
@@ -46,8 +52,12 @@ final authStateProvider = StreamProvider<AuthState>((ref) {
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
-    initialLocation: '/discover',
+    initialLocation: initialAppLocation,
     routes: [
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingScreen(),
+      ),
       GoRoute(
         path: '/discover',
         builder: (context, state) => const DiscoverScreen(),
@@ -482,6 +492,339 @@ final myProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) {
   if (session == null) throw StateError('Authentication required');
   return ref.watch(questRepositoryProvider).getMyProfile(session.accessToken);
 });
+
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({super.key});
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final pageController = PageController();
+  int page = 0;
+
+  static const pages = [
+    _OnboardingPageData(
+      eyebrow: 'DISCOVER',
+      title: 'Life comes with\nside quests.',
+      body: 'Turn ordinary moments into small adventures, shared challenges, and stories worth keeping.',
+      icon: Icons.explore_rounded,
+      colors: [Color(0xFF1E251C), Color(0xFF596247)],
+    ),
+    _OnboardingPageData(
+      eyebrow: 'TAKE PART',
+      title: 'Choose something\nworth trying.',
+      body: 'Join a handful of people, follow clear rules, and submit one official entry before the slots are gone.',
+      icon: Icons.flag_rounded,
+      colors: [Color(0xFF5B395F), Color(0xFFDF805F)],
+    ),
+    _OnboardingPageData(
+      eyebrow: 'CREATE',
+      title: 'Challenge your\nfriends or city.',
+      body: 'Create playful quests for friends, communities, or local explorers—with rewards only when you want them.',
+      icon: Icons.add_reaction_rounded,
+      colors: [Color(0xFF214D55), Color(0xFF62A897)],
+    ),
+    _OnboardingPageData(
+      eyebrow: 'GET RECOGNIZED',
+      title: 'Proof in.\nWinners out.',
+      body: 'Every entry has a trusted timestamp. Creators review the proof, and published winner rules stay fair.',
+      icon: Icons.emoji_events_rounded,
+      colors: [Color(0xFF564B1F), Color(0xFFC99B35)],
+    ),
+  ];
+
+  @override
+  void dispose() {
+    pageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> finish({required bool authenticate}) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('onboarding_complete', true);
+    if (!mounted) return;
+    context.go(authenticate ? '/auth?next=/discover' : '/discover');
+  }
+
+  void next() {
+    if (page == pages.length - 1) {
+      finish(authenticate: true);
+    } else {
+      pageController.nextPage(
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = pages[page];
+    return Scaffold(
+      backgroundColor: ink,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 12, 14, 8),
+              child: Row(
+                children: [
+                  const Text(
+                    'sidequest',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1.3,
+                    ),
+                  ),
+                  const Text(
+                    '.',
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 23,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => finish(authenticate: false),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                    ),
+                    child: const Text('Skip'),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: PageView.builder(
+                controller: pageController,
+                itemCount: pages.length,
+                onPageChanged: (value) => setState(() => page = value),
+                itemBuilder: (context, index) =>
+                    _OnboardingArtwork(data: pages[index], index: index),
+              ),
+            ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: Padding(
+                key: ValueKey(page),
+                padding: const EdgeInsets.fromLTRB(28, 20, 28, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      data.eyebrow,
+                      style: const TextStyle(
+                        color: accent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.8,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      data.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 37,
+                        height: .98,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -1.8,
+                      ),
+                    ),
+                    const SizedBox(height: 13),
+                    Text(
+                      data.body,
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 15,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 23, 28, 18),
+              child: Row(
+                children: [
+                  for (var index = 0; index < pages.length; index++) ...[
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      width: index == page ? 22 : 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: index == page ? accent : Colors.white24,
+                        borderRadius: BorderRadius.circular(100),
+                      ),
+                    ),
+                    if (index < pages.length - 1) const SizedBox(width: 6),
+                  ],
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: next,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: ink,
+                      minimumSize: const Size(145, 54),
+                    ),
+                    label: Text(
+                      page == pages.length - 1 ? 'Get started' : 'Next',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    iconAlignment: IconAlignment.end,
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnboardingArtwork extends StatelessWidget {
+  const _OnboardingArtwork({required this.data, required this.index});
+  final _OnboardingPageData data;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 20),
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: data.colors,
+            ),
+            borderRadius: BorderRadius.circular(32),
+          ),
+        ),
+        Positioned(
+          left: 24,
+          top: 24,
+          child: Transform.rotate(
+            angle: -.12,
+            child: _FloatingLabel(
+              icon: Icons.location_on_outlined,
+              text: index.isEven ? 'Nearby quest' : '3 slots left',
+            ),
+          ),
+        ),
+        Positioned(
+          right: 20,
+          bottom: 25,
+          child: Transform.rotate(
+            angle: .1,
+            child: _FloatingLabel(
+              icon: Icons.bolt_rounded,
+              text: index < 2 ? 'Try something new' : 'Rules locked',
+            ),
+          ),
+        ),
+        Container(
+          width: 160,
+          height: 160,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: .1),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white24),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 38,
+                offset: Offset(0, 20),
+              ),
+            ],
+          ),
+          child: Icon(data.icon, color: accent, size: 82),
+        ),
+        Positioned(
+          top: 32,
+          right: 34,
+          child: Icon(
+            Icons.auto_awesome_rounded,
+            color: accent.withValues(alpha: .9),
+            size: 30,
+          ),
+        ),
+        Positioned(
+          bottom: 42,
+          left: 38,
+          child: Icon(
+            Icons.draw_outlined,
+            color: Colors.white.withValues(alpha: .6),
+            size: 34,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _FloatingLabel extends StatelessWidget {
+  const _FloatingLabel({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+    decoration: BoxDecoration(
+      color: const Color(0xF2FFFFFF),
+      borderRadius: BorderRadius.circular(13),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x33000000),
+          blurRadius: 18,
+          offset: Offset(0, 8),
+        ),
+      ],
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: ink),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: const TextStyle(
+            color: ink,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _OnboardingPageData {
+  const _OnboardingPageData({
+    required this.eyebrow,
+    required this.title,
+    required this.body,
+    required this.icon,
+    required this.colors,
+  });
+
+  final String eyebrow;
+  final String title;
+  final String body;
+  final IconData icon;
+  final List<Color> colors;
+}
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
