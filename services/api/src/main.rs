@@ -64,6 +64,10 @@ async fn main() -> io::Result<()> {
 fn payment_config_from_environment() -> Option<PaymentConfig> {
     let network = std::env::var("NIMIQ_NETWORK").ok()?;
     let treasury_address = std::env::var("NIMIQ_TREASURY_ADDRESS").ok()?;
+    let verifier_url = std::env::var("NIMIQ_VERIFIER_URL").ok()?;
+    let verifier_token = std::env::var("NIMIQ_VERIFIER_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
     let min_confirmations = std::env::var("NIMIQ_MIN_CONFIRMATIONS")
         .ok()
         .and_then(|value| value.parse::<i32>().ok())
@@ -71,6 +75,7 @@ fn payment_config_from_environment() -> Option<PaymentConfig> {
 
     if network != "testnet"
         || !api::payments::is_valid_nimiq_address(&treasury_address)
+        || !(verifier_url.starts_with("http://") || verifier_url.starts_with("https://"))
         || min_confirmations < 1
     {
         return None;
@@ -80,5 +85,7 @@ fn payment_config_from_environment() -> Option<PaymentConfig> {
         network,
         treasury_address,
         min_confirmations,
+        verifier_url: verifier_url.trim_end_matches('/').to_string(),
+        verifier_token,
     })
 }

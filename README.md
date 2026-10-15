@@ -40,6 +40,14 @@ Run the web app:
 pnpm dev:web
 ```
 
+Run the independent Nimiq TestAlbatross verifier before testing reward funding:
+
+```bash
+pnpm dev:nimiq-verifier
+```
+
+The verifier binds to `127.0.0.1:8090` by default, joins the official TestAlbatross seed set, and exposes a health check at `/health`. It never holds treasury signing keys.
+
 Run the API:
 
 ```bash
@@ -71,6 +79,6 @@ Copy the root `.env.example` for the API and `apps/web/.env.example` to `apps/we
 
 Wallet access is optional. The web app remains usable in a normal browser and detects Nimiq Pay at runtime before requesting wallet capabilities.
 
-Monetary quests deliberately stop at `AWAITING_FUNDING` until chain verification and payout signing are configured. Client wallet success alone never opens a quest or records a payout. See [verified reward funding readiness](docs/payment-readiness.md) for the required infrastructure and environment values.
+Monetary quests remain `AWAITING_FUNDING` until the API independently verifies the exact Nimiq Pay transaction through the TestAlbatross verifier. Client wallet success alone never opens a quest or records a payout. Automatic winner payouts remain disabled until the isolated signer is configured. See [verified reward funding readiness](docs/payment-readiness.md) for the full security model.
 
 See [architecture](docs/architecture.md) and [technical validation](docs/technical-validation.md) for the current engineering decisions and external setup requirements.

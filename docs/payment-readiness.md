@@ -2,10 +2,12 @@
 
 SideQuest does not mark a monetary quest funded because a browser reports that a wallet dialog succeeded. The API must independently verify the chain transaction, its recipient, amount, network, memo/reference, and confirmation depth before moving a quest from `AWAITING_FUNDING` to `OPEN`.
 
-## Confirmed integration surface
+## Implemented funding surface
 
-- Nimiq Pay injects the Mini App provider and presents native confirmation for sensitive wallet operations. The installed `@nimiq/mini-app-sdk` exposes `sendBasicTransaction` and `sendBasicTransactionWithData`; values are expressed in luna, where 100,000 luna equals 1 NIM.
-- Nimiq's JSON-RPC API exposes `getTransactionByHash` and related history methods for backend verification. A production verifier needs a history-enabled RPC endpoint for the selected network.
+- Nimiq Pay injects the Mini App provider and presents native confirmation for sensitive wallet operations. The installed `@nimiq/mini-app-sdk` exposes `sendBasicTransactionWithData`, returns a transaction hash, and expresses values in luna, where 100,000 luna equals 1 NIM.
+- The private verifier uses the official `@nimiq/core` Node.js Web Client, explicitly selects TestAlbatross and its official testnet seed nodes, establishes consensus, and fetches the transaction by the wallet-returned hash.
+- The verifier rejects any network, treasury recipient, integer-luna amount, or `SQF:` payment-reference mismatch. The Rust API repeats those checks before storing the receipt.
+- A matching transaction is recorded as pending until its state is `confirmed` and it reaches the configured confirmation depth. Only then does one database transaction confirm the intent, mark the reward pool funded, and open the quest.
 - The existing database already separates reward pools, payment intents, observed transactions, reward allocations, and payouts. Provider references and idempotency keys are unique, and quest opening remains gated on confirmed funding.
 
 References:
@@ -29,7 +31,7 @@ Do not place a treasury private key, seed phrase, or raw signing material in `.e
 
 - `NIMIQ_TREASURY_ADDRESS`: a dedicated Nimiq testnet receiving address.
 - `NIMIQ_VERIFIER_URL`: the private URL of the SideQuest verifier service. The verifier uses Nimiq's official Node.js Web Client to join TestAlbatross directly, so development does not depend on an unlisted public testnet RPC server.
-- `NIMIQ_MIN_CONFIRMATIONS`: the confirmation policy; the placeholder is two.
+- `NIMIQ_MIN_CONFIRMATIONS`: the confirmation policy; development currently requires two.
 - Reward denomination policy: either publish rewards directly in NIM, or approve a server-side USD/NIM quote source, quote lifetime, rounding rule, and slippage policy.
 - `PAYOUT_SIGNER_URL`: an isolated service that accepts an authenticated, idempotent payout command and never exports its key.
 - `PAYOUT_SIGNER_TOKEN`: a server-only credential for that service, stored through the deployment secret manager.
@@ -42,8 +44,8 @@ USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supp
 1. The creator publishes a reward quest; it stays `AWAITING_FUNDING`.
 2. The authenticated creator requests an idempotent payment intent. The API calculates the complete prize pool in integer luna, selects the configured treasury, creates a unique reference, and returns the same active intent on safe retries.
 3. The server fixes the settlement amount, expiry, network, treasury recipient, and unique quest memo/reference.
-4. Nimiq Pay asks the creator to approve `sendBasicTransactionWithData`.
-5. The client submits the resulting transaction identifier/serialized result to the API; client success remains `PENDING`, never `CONFIRMED`.
+4. Nimiq Pay asks the creator to approve `sendBasicTransactionWithData` and broadcasts the transaction.
+5. The client submits only the resulting transaction hash to the API; client success remains `PENDING`, never `CONFIRMED`.
 6. The verifier independently reads the chain and compares network, recipient, amount, memo/reference, and confirmation depth.
 7. A matching transaction atomically confirms the intent, funds the reward pool, and opens the quest. Replays return the existing intent/transaction result.
 8. Finalization creates one allocation per winner. The signing service submits each payout with an immutable idempotency key.
@@ -52,4 +54,4 @@ USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supp
 
 ## Environment placeholders
 
-The root `.env.example` contains all non-secret names required by this design. The ignored local `.env` also contains blank placeholders. Financial features must fail closed while any required value is absent.
+The root `.env.example` contains all non-secret names required by this design. `NIMIQ_VERIFIER_TOKEN` is optional only while the verifier is bound to loopback; it becomes mandatory if the verifier is exposed on another interface. The ignored local `.env` contains the development values. Financial features fail closed while required public configuration is absent.

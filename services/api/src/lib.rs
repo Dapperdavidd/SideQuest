@@ -17,6 +17,8 @@ pub struct PaymentConfig {
     pub network: String,
     pub treasury_address: String,
     pub min_confirmations: i32,
+    pub verifier_url: String,
+    pub verifier_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -57,6 +59,8 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(quests::validate_quest)
             .service(payments::create_funding_intent)
             .service(payments::get_funding_intent)
+            .service(payments::submit_funding_transaction)
+            .service(payments::refresh_funding_transaction)
             .service(entries::submit_entry)
             .service(reviews::list_entries_for_creator)
             .service(reviews::review_entry)

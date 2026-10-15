@@ -175,6 +175,61 @@ paths:
                 $ref: "#/components/schemas/FundingIntent"
         "404":
           description: Intent is absent or does not belong to the caller
+  /funding-intents/{intentId}/transactions:
+    post:
+      summary: Submit a Nimiq Pay transaction hash for independent verification
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: intentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transaction_hash]
+              properties:
+                transaction_hash:
+                  type: string
+                  maxLength: 128
+      responses:
+        "200":
+          description: Transaction accepted as pending or independently confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FundingVerificationResult"
+        "409":
+          description: Transaction is already assigned to another intent
+        "422":
+          description: Transaction is malformed or does not exactly match the intent
+        "503":
+          description: Nimiq verification is temporarily unavailable
+  /funding-intents/{intentId}/refresh:
+    post:
+      summary: Refresh a submitted funding transaction from TestAlbatross
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: intentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Latest independently verified transaction and intent state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FundingVerificationResult"
   /quests/{questId}/entries:
     get:
       summary: List submissions and evidence for the quest creator
@@ -340,6 +395,45 @@ components:
         created_at:
           type: string
           format: date-time
+    FundingVerificationResult:
+      type: object
+      required: [intent, transaction, quest_opened]
+      properties:
+        intent:
+          $ref: "#/components/schemas/FundingIntent"
+        transaction:
+          type: object
+          required:
+            - transaction_hash
+            - state
+            - sender
+            - recipient
+            - value_luna
+            - reference
+            - network
+            - confirmations
+          properties:
+            transaction_hash:
+              type: string
+            state:
+              type: string
+              enum: [new, pending, included, confirmed, invalidated, expired]
+            sender:
+              type: string
+            recipient:
+              type: string
+            value_luna:
+              type: integer
+            reference:
+              type: string
+            network:
+              type: string
+            confirmations:
+              type: integer
+            block_height:
+              type: [integer, "null"]
+        quest_opened:
+          type: boolean
     CreateQuest:
       type: object
       required:
