@@ -50,6 +50,43 @@ paths:
           description: Related quests ordered by latest creation or publishing activity
         "401":
           description: Missing, invalid, or expired access token
+  /users/me/payout-destination:
+    get:
+      summary: Get the authenticated user's Nimiq testnet payout destination
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current payout destination
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayoutDestination"
+        "404":
+          description: No payout destination is configured
+    put:
+      summary: Validate and save the authenticated user's Nimiq testnet payout destination
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+      responses:
+        "200":
+          description: Normalized payout destination
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayoutDestination"
+        "422":
+          description: Address format or checksum is invalid
   /quests:
     get:
       summary: Browse public quests
@@ -258,7 +295,7 @@ paths:
         "201":
           description: Entry and evidence accepted with a trusted timestamp
         "409":
-          description: Membership, deadline, capacity, duplicate, or quest status prevents acceptance
+          description: Membership, payout destination, deadline, capacity, duplicate, or quest status prevents acceptance
         "422":
           description: Caption or evidence is invalid
   /quests/{questId}/entries/{entryId}/review:
@@ -317,7 +354,7 @@ paths:
         "200":
           description: Final winner positions and finalized status
         "409":
-          description: Entries remain unreviewed or quest is not reviewable
+          description: Entries remain unreviewed, reward funding is unavailable, a payout snapshot is missing, or the quest is not reviewable
         "422":
           description: Winner selection violates the published method or count
   /quests/validate:
@@ -349,6 +386,19 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    PayoutDestination:
+      type: object
+      required: [network, address, updated_at]
+      properties:
+        network:
+          type: string
+          enum: [testnet]
+        address:
+          type: string
+          description: Checksum-validated Nimiq address normalized into four-character groups
+        updated_at:
+          type: string
+          format: date-time
     FundingIntent:
       type: object
       required:

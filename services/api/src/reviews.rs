@@ -135,6 +135,10 @@ pub enum ReviewError {
     IncompleteReviews,
     #[error("review reason cannot exceed 500 characters")]
     InvalidReason,
+    #[error("the reward pool is not confirmed")]
+    FundingNotReady,
+    #[error("a winning entry does not have a locked payout destination")]
+    PayoutDestinationMissing,
     #[error(transparent)]
     Finalization(#[from] FinalizationError),
     #[error("review service is temporarily unavailable")]
@@ -147,7 +151,10 @@ impl ResponseError for ReviewError {
             Self::Auth(error) => error.status_code(),
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::NotCreator => StatusCode::FORBIDDEN,
-            Self::NotReady | Self::IncompleteReviews => StatusCode::CONFLICT,
+            Self::NotReady
+            | Self::IncompleteReviews
+            | Self::FundingNotReady
+            | Self::PayoutDestinationMissing => StatusCode::CONFLICT,
             Self::InvalidReason | Self::Finalization(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Database => StatusCode::SERVICE_UNAVAILABLE,
         }
@@ -164,6 +171,8 @@ impl ResponseError for ReviewError {
                 Self::NotReady => "quest_not_ready_for_review",
                 Self::IncompleteReviews => "incomplete_reviews",
                 Self::InvalidReason => "invalid_review_reason",
+                Self::FundingNotReady => "reward_funding_not_ready",
+                Self::PayoutDestinationMissing => "payout_destination_missing",
                 Self::Finalization(_) => "invalid_winner_selection",
                 Self::Database => "review_service_unavailable",
                 Self::Auth(_) => unreachable!(),
@@ -330,7 +339,11 @@ pub async fn finalize_quest(
                status::text as status,
                deadline,
                winner_count,
-               winner_selection_method::text as winner_selection_method
+               winner_selection_method::text as winner_selection_method,
+               reward_enabled,
+               reward_amount_minor,
+               reward_currency::text as reward_currency,
+               settlement_asset
         from public.quests
         where id = $1
         for update
@@ -409,16 +422,107 @@ pub async fn finalize_quest(
         )?
     };
 
+    let reward_enabled: bool = quest
+        .try_get("reward_enabled")
+        .map_err(|_| ReviewError::Database)?;
+    let reward_amount_minor: Option<i64> = quest
+        .try_get("reward_amount_minor")
+        .map_err(|_| ReviewError::Database)?;
+    let reward_currency: Option<String> = quest
+        .try_get("reward_currency")
+        .map_err(|_| ReviewError::Database)?;
+    let settlement_asset: Option<String> = quest
+        .try_get("settlement_asset")
+        .map_err(|_| ReviewError::Database)?;
+    let reward_pool_id = if reward_enabled {
+        if reward_amount_minor.is_none()
+            || reward_currency.as_deref() != Some("NIM")
+            || settlement_asset.as_deref() != Some("NIM")
+        {
+            return Err(ReviewError::FundingNotReady);
+        }
+        Some(
+            sqlx::query_scalar::<_, Uuid>(
+                "select id from public.reward_pools where quest_id = $1 and funded_at is not null for update",
+            )
+            .bind(quest_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|_| ReviewError::Database)?
+            .ok_or(ReviewError::FundingNotReady)?,
+        )
+    } else {
+        None
+    };
+
     for (index, entry_id) in winners.iter().enumerate() {
-        sqlx::query(
-            "insert into public.quest_winners (quest_id, entry_id, winner_position) values ($1, $2, $3)",
+        let winner_id = sqlx::query_scalar::<_, Uuid>(
+            "insert into public.quest_winners (quest_id, entry_id, winner_position) values ($1, $2, $3) returning id",
         )
         .bind(quest_id)
         .bind(entry_id)
         .bind((index + 1) as i16)
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await
         .map_err(|_| ReviewError::Database)?;
+
+        if let Some(reward_pool_id) = reward_pool_id {
+            let recipient = sqlx::query(
+                r#"
+                select participant_id, payout_destination_address
+                from public.quest_entries
+                where id = $1 and quest_id = $2
+                "#,
+            )
+            .bind(entry_id)
+            .bind(quest_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|_| ReviewError::Database)?;
+            let recipient_id: Uuid = recipient
+                .try_get("participant_id")
+                .map_err(|_| ReviewError::Database)?;
+            let destination_address: Option<String> = recipient
+                .try_get("payout_destination_address")
+                .map_err(|_| ReviewError::Database)?;
+            let destination_address =
+                destination_address.ok_or(ReviewError::PayoutDestinationMissing)?;
+            let amount_luna = reward_amount_minor.ok_or(ReviewError::FundingNotReady)?;
+            let allocation_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                insert into public.reward_allocations (
+                  reward_pool_id, winner_id, recipient_id, amount_minor, currency
+                )
+                values ($1, $2, $3, $4, 'NIM')
+                returning id
+                "#,
+            )
+            .bind(reward_pool_id)
+            .bind(winner_id)
+            .bind(recipient_id)
+            .bind(amount_luna)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|_| ReviewError::Database)?;
+            sqlx::query(
+                r#"
+                insert into public.payouts (
+                  reward_allocation_id, recipient_id, amount_minor,
+                  settlement_asset, network, destination_address,
+                  status, idempotency_key
+                )
+                values ($1, $2, $3, 'NIM', 'testnet', $4, 'PENDING', $5)
+                "#,
+            )
+            .bind(allocation_id)
+            .bind(recipient_id)
+            .bind(amount_luna)
+            .bind(destination_address)
+            .bind(format!("payout:{quest_id}:{winner_id}"))
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| ReviewError::Database)?;
+        }
     }
     sqlx::query(
         "update public.quests set status = 'FINALIZED', closed_at = coalesce(closed_at, now()), updated_at = now() where id = $1",

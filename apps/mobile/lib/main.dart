@@ -343,6 +343,44 @@ class QuestRepository {
     );
     return UserProfile.fromJson(response.data!);
   }
+
+  Future<PayoutDestination?> getPayoutDestination(String accessToken) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/users/me/payout-destination',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      return PayoutDestination.fromJson(response.data!);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<PayoutDestination> setPayoutDestination(
+    String address,
+    String accessToken,
+  ) async {
+    final response = await _dio.put<Map<String, dynamic>>(
+      '/users/me/payout-destination',
+      data: {'address': address},
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return PayoutDestination.fromJson(response.data!);
+  }
+}
+
+class PayoutDestination {
+  const PayoutDestination({required this.network, required this.address});
+
+  factory PayoutDestination.fromJson(Map<String, dynamic> json) =>
+      PayoutDestination(
+        network: json['network'] as String,
+        address: json['address'] as String,
+      );
+
+  final String network;
+  final String address;
 }
 
 class UserProfile {
@@ -492,6 +530,14 @@ final myProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) {
   if (session == null) throw StateError('Authentication required');
   return ref.watch(questRepositoryProvider).getMyProfile(session.accessToken);
 });
+final payoutDestinationProvider =
+    FutureProvider.autoDispose<PayoutDestination?>((ref) {
+      final session = currentSession;
+      if (session == null) return null;
+      return ref
+          .watch(questRepositoryProvider)
+          .getPayoutDestination(session.accessToken);
+    });
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -4047,16 +4093,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final usernameController = TextEditingController();
   final nameController = TextEditingController();
   final bioController = TextEditingController();
+  final payoutAddressController = TextEditingController();
   String? loadedProfileId;
   bool editing = false;
   bool saving = false;
+  bool savingPayoutAddress = false;
+  bool payoutAddressLoaded = false;
   String? errorMessage;
+  String? payoutErrorMessage;
 
   @override
   void dispose() {
     usernameController.dispose();
     nameController.dispose();
     bioController.dispose();
+    payoutAddressController.dispose();
     super.dispose();
   }
 
@@ -4119,6 +4170,40 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  Future<void> savePayoutAddress() async {
+    final session = currentSession;
+    if (session == null) return;
+    setState(() {
+      savingPayoutAddress = true;
+      payoutErrorMessage = null;
+    });
+    try {
+      final destination = await ref
+          .read(questRepositoryProvider)
+          .setPayoutDestination(
+            payoutAddressController.text.trim(),
+            session.accessToken,
+          );
+      payoutAddressController.text = destination.address;
+      ref.invalidate(payoutDestinationProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('NIM payout address saved.')),
+        );
+      }
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      setState(() {
+        payoutErrorMessage = data is Map<String, dynamic>
+            ? data['message'] as String? ??
+                  'That Nimiq address could not be saved.'
+            : 'That Nimiq address could not be saved.';
+      });
+    } finally {
+      if (mounted) setState(() => savingPayoutAddress = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.watch(authStateProvider);
@@ -4168,6 +4253,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     else
                       _buildProfile(profile, session.user.email ?? ''),
                     const SizedBox(height: 28),
+                    _buildPayoutDestination(),
+                    const SizedBox(height: 28),
                     OutlinedButton.icon(
                       onPressed: saving
                           ? null
@@ -4188,6 +4275,107 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 );
               },
             ),
+      ),
+    );
+  }
+
+  Widget _buildPayoutDestination() {
+    final destination = ref.watch(payoutDestinationProvider);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Color(0xFFF1FFD0),
+                foregroundColor: ink,
+                child: Icon(Icons.account_balance_wallet_outlined),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'NIM reward destination',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Required before entering a rewarded quest.',
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          destination.when(
+            loading: () => const LinearProgressIndicator(color: accent),
+            error: (_, _) => _QuestFeedError(
+              onRetry: () => ref.invalidate(payoutDestinationProvider),
+            ),
+            data: (value) {
+              if (!payoutAddressLoaded) {
+                payoutAddressLoaded = true;
+                payoutAddressController.text = value?.address ?? '';
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: payoutAddressController,
+                    autocorrect: false,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Nimiq Testnet address',
+                      hintText: 'NQ00 0000 0000 0000 0000 0000 0000 0000 0000',
+                      helperText: 'Locked when a rewarded entry is submitted.',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (payoutErrorMessage != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      payoutErrorMessage!,
+                      style: const TextStyle(color: Color(0xFF8F2E1E)),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: savingPayoutAddress ? null : savePayoutAddress,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: ink,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: savingPayoutAddress
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.verified_outlined),
+                    label: Text(
+                      savingPayoutAddress
+                          ? 'Validating…'
+                          : 'Save payout address',
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
       ),
     );
   }

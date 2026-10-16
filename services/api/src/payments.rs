@@ -1,4 +1,4 @@
-use actix_web::{HttpRequest, HttpResponse, ResponseError, get, http::StatusCode, post, web};
+use actix_web::{HttpRequest, HttpResponse, ResponseError, get, http::StatusCode, post, put, web};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -65,6 +65,10 @@ pub enum FundingError {
     VerifierUnavailable,
     #[error("funding service is temporarily unavailable")]
     Database,
+    #[error("Nimiq payout address is invalid")]
+    InvalidPayoutAddress,
+    #[error("payout destination was not found")]
+    PayoutDestinationNotFound,
 }
 
 impl ResponseError for FundingError {
@@ -72,9 +76,10 @@ impl ResponseError for FundingError {
         match self {
             Self::Auth(error) => error.status_code(),
             Self::NotFound | Self::IntentNotFound => StatusCode::NOT_FOUND,
+            Self::PayoutDestinationNotFound => StatusCode::NOT_FOUND,
             Self::NotCreator => StatusCode::FORBIDDEN,
             Self::IntentExpired => StatusCode::GONE,
-            Self::InvalidTransaction | Self::TransactionMismatch => {
+            Self::InvalidTransaction | Self::TransactionMismatch | Self::InvalidPayoutAddress => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             Self::NotAwaitingFunding | Self::InvalidReward | Self::TransactionAlreadyUsed => {
@@ -105,6 +110,8 @@ impl ResponseError for FundingError {
                 Self::TransactionAlreadyUsed => "funding_transaction_already_used",
                 Self::VerifierUnavailable => "nimiq_verifier_unavailable",
                 Self::Database => "funding_service_unavailable",
+                Self::InvalidPayoutAddress => "invalid_payout_address",
+                Self::PayoutDestinationNotFound => "payout_destination_not_found",
                 Self::Auth(_) => unreachable!(),
             },
             "message": self.to_string(),
@@ -187,6 +194,66 @@ pub struct FundingIntent {
     minimum_confirmations: i32,
     expires_at: DateTime<Utc>,
     created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetPayoutDestination {
+    address: String,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct PayoutDestination {
+    network: String,
+    address: String,
+    updated_at: DateTime<Utc>,
+}
+
+#[get("/users/me/payout-destination")]
+pub async fn get_payout_destination(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<PayoutDestination>, FundingError> {
+    let user = state.auth.authenticate(&request).await?;
+    let destination = sqlx::query_as::<_, PayoutDestination>(
+        r#"
+        select network, address, updated_at
+        from public.user_payout_destinations
+        where user_id = $1 and network = 'testnet'
+        "#,
+    )
+    .bind(user.id)
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| FundingError::Database)?
+    .ok_or(FundingError::PayoutDestinationNotFound)?;
+    Ok(web::Json(destination))
+}
+
+#[put("/users/me/payout-destination")]
+pub async fn set_payout_destination(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    body: web::Json<SetPayoutDestination>,
+) -> Result<web::Json<PayoutDestination>, FundingError> {
+    let user = state.auth.authenticate(&request).await?;
+    let address = format_nimiq_address(&body.address).ok_or(FundingError::InvalidPayoutAddress)?;
+    let destination = sqlx::query_as::<_, PayoutDestination>(
+        r#"
+        insert into public.user_payout_destinations (user_id, network, address)
+        values ($1, 'testnet', $2)
+        on conflict (user_id) do update
+          set network = excluded.network,
+              address = excluded.address,
+              updated_at = now()
+        returning network, address, updated_at
+        "#,
+    )
+    .bind(user.id)
+    .bind(address)
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| FundingError::Database)?;
+    Ok(web::Json(destination))
 }
 
 impl StoredFundingIntent {
@@ -784,12 +851,49 @@ pub fn is_valid_nimiq_address(address: &str) -> bool {
     let compact: String = address
         .chars()
         .filter(|character| !character.is_whitespace())
+        .map(|character| character.to_ascii_uppercase())
         .collect();
-    compact.len() == 36
-        && compact.starts_with("NQ")
-        && compact
-            .chars()
-            .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+    if compact.len() != 36
+        || !compact.starts_with("NQ")
+        || !compact.chars().all(|character| {
+            character.is_ascii_digit() || "ABCDEFGHJKLMNPQRSTUVXY".contains(character)
+        })
+    {
+        return false;
+    }
+
+    let rearranged = format!("{}{}", &compact[4..], &compact[..4]);
+    let mut remainder = 0_u32;
+    for character in rearranged.chars() {
+        let value = if character.is_ascii_digit() {
+            character.to_digit(10).expect("digit checked").to_string()
+        } else {
+            (character as u32 - 'A' as u32 + 10).to_string()
+        };
+        for digit in value.bytes() {
+            remainder = (remainder * 10 + u32::from(digit - b'0')) % 97;
+        }
+    }
+    remainder == 1
+}
+
+pub fn format_nimiq_address(address: &str) -> Option<String> {
+    let compact: String = address
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .map(|character| character.to_ascii_uppercase())
+        .collect();
+    if !is_valid_nimiq_address(&compact) {
+        return None;
+    }
+    Some(
+        compact
+            .as_bytes()
+            .chunks(4)
+            .map(|chunk| std::str::from_utf8(chunk).expect("ASCII address"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 pub fn transition_payment(
@@ -884,9 +988,20 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_a_valid_compact_payout_address() {
+        assert_eq!(
+            format_nimiq_address("nq24vu9v76nvsrfaqvgjje50139q3u38dun0").as_deref(),
+            Some("NQ24 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0")
+        );
+    }
+
+    #[test]
     fn rejects_placeholder_or_malformed_addresses() {
         assert!(!is_valid_nimiq_address("NQ00_REPLACE_ME"));
         assert!(!is_valid_nimiq_address("0x1234"));
+        assert!(!is_valid_nimiq_address(
+            "NQ25 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0"
+        ));
     }
 
     fn verification_context() -> FundingVerificationContext {

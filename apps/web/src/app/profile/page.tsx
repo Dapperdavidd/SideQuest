@@ -2,10 +2,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, Award, Compass, LogOut, MapPin, Sparkles, Trophy } from "lucide-react";
+import { ArrowLeft, Award, Compass, LogOut, MapPin, Sparkles, Trophy, WalletCards } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { getViewer } from "@/lib/auth/viewer";
 import { signOut } from "./actions";
+import { PayoutDestinationForm } from "./payout-destination-form";
 
 export default function ProfilePage() {
   return (
@@ -61,6 +62,10 @@ async function ProfileContent() {
           <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
             <span className="text-xs uppercase tracking-[0.16em] text-white/35">Signed in with</span>
             <p className="mt-1 text-sm text-white/75">{viewer.email ?? "Google account"}</p>
+          </div>
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+            <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-dark"><WalletCards size={19} /></span><div><h3 className="font-display font-bold">NIM reward destination</h3><p className="mt-1 text-sm leading-6 text-white/50">Required before entering a rewarded quest. The address is locked with each official submission.</p></div></div>
+            <PayoutDestinationForm />
           </div>
         </section>
       </div>

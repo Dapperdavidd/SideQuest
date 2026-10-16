@@ -9,6 +9,8 @@ SideQuest does not mark a monetary quest funded because a browser reports that a
 - The verifier rejects any network, treasury recipient, integer-luna amount, or `SQF:` payment-reference mismatch. The Rust API repeats those checks before storing the receipt.
 - A matching transaction is recorded as pending until its state is `confirmed` and it reaches the configured confirmation depth. Only then does one database transaction confirm the intent, mark the reward pool funded, and open the quest.
 - The existing database already separates reward pools, payment intents, observed transactions, reward allocations, and payouts. Provider references and idempotency keys are unique, and quest opening remains gated on confirmed funding.
+- Authenticated participants can register one checksum-validated TestAlbatross payout destination. Rewarded submissions snapshot that address when the official entry is accepted, so changing a profile later cannot redirect an already-earned reward.
+- Quest finalization atomically creates one immutable reward allocation and one idempotent pending payout for each winner. The pending records deliberately remain unsigned until the isolated signer is configured.
 
 References:
 
@@ -17,11 +19,11 @@ References:
 - [Nimiq RPC methods](https://nimiq.dev/rpc/methods/)
 - [Nimiq public mainnet RPC limitations](https://rpc.nimiqwatch.com/)
 
-## Decision required before financial endpoints are enabled
+## Settlement decision
 
 The app needs one explicit settlement model:
 
-1. **Isolated testnet escrow signer — recommended for the competition.** Creators fund a dedicated testnet address. The API verifies deposits through a configured testnet history node. After finalization, a separate restricted signing service submits winner payouts. The API never stores or receives a raw private key.
+1. **Isolated testnet escrow signer — selected for the competition.** Creators fund the dedicated SideQuest testnet treasury. The API verifies deposits through the TestAlbatross verifier. After finalization, a separate restricted signing service submits winner payouts. The API never stores or receives a raw private key.
 2. **Creator-direct payouts.** The creator pays winners from their own wallet after finalization. This remains self-custodial but cannot guarantee or automate payout and therefore does not satisfy the current verified-payout requirement by itself.
 3. **Third-party custody/payment provider.** Appropriate for real funds only after provider, legal, fee, webhook-signature, reconciliation, refund, and regional availability review.
 
@@ -35,7 +37,7 @@ Do not place a treasury private key, seed phrase, or raw signing material in `.e
 - Reward denomination policy: either publish rewards directly in NIM, or approve a server-side USD/NIM quote source, quote lifetime, rounding rule, and slippage policy.
 - `PAYOUT_SIGNER_URL`: an isolated service that accepts an authenticated, idempotent payout command and never exports its key.
 - `PAYOUT_SIGNER_TOKEN`: a server-only credential for that service, stored through the deployment secret manager.
-- Winner wallet-address collection and change policy, including whether an address is locked when a user joins, submits, or wins.
+- Winner wallet-address collection uses a checksum-validated Nimiq address and locks a snapshot when the official rewarded entry is submitted.
 
 USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supported testnet token contract, decimal handling, receipt/log verification, gas policy, and an EVM payout signer. It should follow after the NIM path is verified end to end.
 
@@ -48,7 +50,7 @@ USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supp
 5. The client submits only the resulting transaction hash to the API; client success remains `PENDING`, never `CONFIRMED`.
 6. The verifier independently reads the chain and compares network, recipient, amount, memo/reference, and confirmation depth.
 7. A matching transaction atomically confirms the intent, funds the reward pool, and opens the quest. Replays return the existing intent/transaction result.
-8. Finalization creates one allocation per winner. The signing service submits each payout with an immutable idempotency key.
+8. Finalization creates one allocation and pending payout per winner using the destination locked with the entry. The signing service submits each payout with its immutable idempotency key.
 9. The verifier independently confirms payouts before the UI displays them as paid.
 10. Expiry, underpayment, overpayment, failed payout, refund, and reconciliation paths remain explicit states with audit records.
 

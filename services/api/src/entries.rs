@@ -56,6 +56,8 @@ pub enum EntryAcceptanceError {
     InvalidCaption,
     #[error("submission evidence does not match the published proof requirements")]
     InvalidEvidence,
+    #[error("add a Nimiq testnet payout address before submitting to a rewarded quest")]
+    PayoutDestinationRequired,
     #[error("entry could not be accepted")]
     Database,
 }
@@ -68,6 +70,8 @@ struct QuestEntryGate {
     accepted_entries: i64,
     proof_requirements: Vec<String>,
     participant_joined: bool,
+    reward_enabled: bool,
+    payout_destination_address: Option<String>,
 }
 
 fn validate_entry_gate(
@@ -85,6 +89,9 @@ fn validate_entry_gate(
     }
     if !gate.participant_joined {
         return Err(EntryAcceptanceError::MembershipRequired);
+    }
+    if gate.reward_enabled && gate.payout_destination_address.is_none() {
+        return Err(EntryAcceptanceError::PayoutDestinationRequired);
     }
     Ok(())
 }
@@ -163,11 +170,16 @@ pub async fn accept_entry(
             q.deadline,
             q.max_entries,
             q.proof_requirements,
+            q.reward_enabled,
             (select count(*) from quest_entries e where e.quest_id = q.id) as accepted_entries,
             exists (
               select 1 from quest_participants p
               where p.quest_id = q.id and p.user_id = $2
-            ) as participant_joined
+            ) as participant_joined,
+            (
+              select d.address from user_payout_destinations d
+              where d.user_id = $2 and d.network = 'testnet'
+            ) as payout_destination_address
         from quests q
         where q.id = $1
         for update
@@ -199,14 +211,23 @@ pub async fn accept_entry(
         participant_joined: row
             .try_get("participant_joined")
             .map_err(|_| EntryAcceptanceError::Database)?,
+        reward_enabled: row
+            .try_get("reward_enabled")
+            .map_err(|_| EntryAcceptanceError::Database)?,
+        payout_destination_address: row
+            .try_get("payout_destination_address")
+            .map_err(|_| EntryAcceptanceError::Database)?,
     };
     validate_entry_gate(&gate, now)?;
     validate_evidence(&command, &gate.proof_requirements)?;
 
     let inserted = sqlx::query(
         r#"
-        insert into quest_entries (quest_id, participant_id, caption, submitted_at)
-        values ($1, $2, $3, $4)
+        insert into quest_entries (
+          quest_id, participant_id, caption, submitted_at,
+          payout_network, payout_destination_address
+        )
+        values ($1, $2, $3, $4, $5, $6)
         returning id, submitted_at
         "#,
     )
@@ -214,6 +235,8 @@ pub async fn accept_entry(
     .bind(command.participant_id)
     .bind(command.caption.as_deref().map(str::trim))
     .bind(now)
+    .bind(gate.reward_enabled.then_some("testnet"))
+    .bind(gate.payout_destination_address.as_deref())
     .fetch_one(&mut *transaction)
     .await
     .map_err(|error| {
@@ -325,6 +348,7 @@ impl ResponseError for EntryError {
                 EntryAcceptanceError::MembershipRequired => "membership_required",
                 EntryAcceptanceError::InvalidCaption => "invalid_caption",
                 EntryAcceptanceError::InvalidEvidence => "invalid_evidence",
+                EntryAcceptanceError::PayoutDestinationRequired => "payout_destination_required",
                 EntryAcceptanceError::Database => "entry_service_unavailable",
             },
             "message": error.to_string(),
@@ -368,6 +392,8 @@ mod tests {
             accepted_entries: accepted,
             proof_requirements: vec!["PHOTO".to_string()],
             participant_joined: true,
+            reward_enabled: false,
+            payout_destination_address: None,
         }
     }
 
@@ -434,6 +460,21 @@ mod tests {
             validate_entry_gate(&gate, now),
             Err(EntryAcceptanceError::MembershipRequired)
         );
+    }
+
+    #[test]
+    fn rewarded_quests_require_a_payout_destination() {
+        let now = Utc::now();
+        let mut gate = gate("OPEN", now + Duration::hours(1), 5, 0);
+        gate.reward_enabled = true;
+        assert_eq!(
+            validate_entry_gate(&gate, now),
+            Err(EntryAcceptanceError::PayoutDestinationRequired)
+        );
+
+        gate.payout_destination_address =
+            Some("NQ24 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0".to_string());
+        assert!(validate_entry_gate(&gate, now).is_ok());
     }
 
     #[test]
