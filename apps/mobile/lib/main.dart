@@ -267,6 +267,38 @@ class QuestRepository {
         .toList(growable: false);
   }
 
+  Future<List<MyQuest>> listSavedQuests(String accessToken) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/users/me/saved-quests',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!
+        .map((json) => MyQuest.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<bool> getQuestSaved(String questId, String accessToken) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/quests/$questId/saved',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!['saved'] as bool;
+  }
+
+  Future<void> saveQuest(String questId, String accessToken) async {
+    await _dio.put<void>(
+      '/quests/$questId/saved',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
+  Future<void> removeSavedQuest(String questId, String accessToken) async {
+    await _dio.delete<void>(
+      '/quests/$questId/saved',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
   Future<Quest> createQuest(
     Map<String, dynamic> payload,
     String accessToken,
@@ -662,8 +694,9 @@ class MyQuest {
   final String? rewardCurrency;
 
   bool get isCreator => relationship == 'CREATOR';
+  bool get isSaved => relationship == 'SAVED';
   bool get isCompleted =>
-      const {'COMPLETED', 'CANCELLED', 'EXPIRED'}.contains(status);
+      const {'FINALIZED', 'CANCELLED', 'SUSPENDED'}.contains(status);
 }
 
 final questRepositoryProvider = Provider<QuestRepository>(
@@ -683,6 +716,23 @@ final myQuestsProvider = FutureProvider.autoDispose<List<MyQuest>>((ref) {
   final session = currentSession;
   if (session == null) return const [];
   return ref.watch(questRepositoryProvider).listMyQuests(session.accessToken);
+});
+final savedQuestsProvider = FutureProvider.autoDispose<List<MyQuest>>((ref) {
+  final session = currentSession;
+  if (session == null) return const [];
+  return ref
+      .watch(questRepositoryProvider)
+      .listSavedQuests(session.accessToken);
+});
+final questSavedProvider = FutureProvider.autoDispose.family<bool, String>((
+  ref,
+  questId,
+) {
+  final session = currentSession;
+  if (session == null) return false;
+  return ref
+      .watch(questRepositoryProvider)
+      .getQuestSaved(questId, session.accessToken);
 });
 final creatorEntriesProvider = FutureProvider.autoDispose
     .family<List<CreatorEntry>, String>((ref, questId) {
@@ -1592,6 +1642,7 @@ class _QuestDetail extends ConsumerWidget {
             pinned: true,
             backgroundColor: ink,
             foregroundColor: Colors.white,
+            actions: [_SaveQuestAction(questId: quest.id)],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,
@@ -1907,6 +1958,77 @@ class _JoinQuestButtonState extends ConsumerState<JoinQuestButton> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _SaveQuestAction extends ConsumerStatefulWidget {
+  const _SaveQuestAction({required this.questId});
+
+  final String questId;
+
+  @override
+  ConsumerState<_SaveQuestAction> createState() => _SaveQuestActionState();
+}
+
+class _SaveQuestActionState extends ConsumerState<_SaveQuestAction> {
+  bool working = false;
+
+  Future<void> toggle(bool saved) async {
+    final session = currentSession;
+    if (session == null) {
+      context.push('/auth?next=/quests/${widget.questId}');
+      return;
+    }
+    setState(() => working = true);
+    try {
+      final repository = ref.read(questRepositoryProvider);
+      if (saved) {
+        await repository.removeSavedQuest(widget.questId, session.accessToken);
+      } else {
+        await repository.saveQuest(widget.questId, session.accessToken);
+      }
+      ref.invalidate(questSavedProvider(widget.questId));
+      ref.invalidate(savedQuestsProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              saved ? 'Removed from saved quests.' : 'Quest saved.',
+            ),
+          ),
+        );
+      }
+    } on DioException catch (error) {
+      if (!mounted) return;
+      final data = error.response?.data;
+      final message = data is Map<String, dynamic>
+          ? data['message'] as String? ?? 'Unable to update this saved quest.'
+          : 'Unable to update this saved quest.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    final savedState = ref.watch(questSavedProvider(widget.questId));
+    final saved = savedState.asData?.value ?? false;
+    return IconButton(
+      tooltip: saved ? 'Remove from saved quests' : 'Save quest',
+      onPressed: working ? null : () => toggle(saved),
+      icon: working
+          ? const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : Icon(saved ? Icons.bookmark_rounded : Icons.bookmark_outline),
     );
   }
 }
@@ -4042,8 +4164,10 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
       );
     }
 
-    final asyncQuests = ref.watch(myQuestsProvider);
-    const labels = ['Active', 'Created', 'Joined', 'Completed'];
+    final asyncQuests = selectedTab == 4
+        ? ref.watch(savedQuestsProvider)
+        : ref.watch(myQuestsProvider);
+    const labels = ['Active', 'Created', 'Joined', 'Completed', 'Saved'];
 
     return Scaffold(
       appBar: AppBar(
@@ -4052,7 +4176,9 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(myQuestsProvider),
+            onPressed: () => ref.invalidate(
+              selectedTab == 4 ? savedQuestsProvider : myQuestsProvider,
+            ),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -4060,7 +4186,11 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
       body: SafeArea(
         child: RefreshIndicator(
           color: ink,
-          onRefresh: () => ref.refresh(myQuestsProvider.future),
+          onRefresh: () => ref.refresh(
+            selectedTab == 4
+                ? savedQuestsProvider.future
+                : myQuestsProvider.future,
+          ),
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
@@ -4108,7 +4238,9 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
                 error: (_, _) => SliverFillRemaining(
                   hasScrollBody: false,
                   child: _QuestFeedError(
-                    onRetry: () => ref.invalidate(myQuestsProvider),
+                    onRetry: () => ref.invalidate(
+                      selectedTab == 4 ? savedQuestsProvider : myQuestsProvider,
+                    ),
                   ),
                 ),
                 data: (quests) {
@@ -4118,6 +4250,7 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
                           1 => quest.isCreator,
                           2 => !quest.isCreator,
                           3 => quest.isCompleted,
+                          4 => true,
                           _ => !quest.isCompleted,
                         };
                       })
@@ -4256,7 +4389,11 @@ class _MyQuestCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        quest.isCreator ? 'CREATED BY YOU' : 'JOINED',
+                        quest.isCreator
+                            ? 'CREATED BY YOU'
+                            : quest.isSaved
+                            ? 'SAVED QUEST'
+                            : 'JOINED',
                         style: const TextStyle(
                           color: muted,
                           fontSize: 10,
