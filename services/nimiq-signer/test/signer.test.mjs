@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 import { PayoutLedger } from "../src/ledger.mjs";
-import { derivePrivateKeyForAddress } from "../src/derive-key.mjs";
+import { derivePrivateKeyForAddress, readUtf8Stream } from "../src/derive-key.mjs";
 import { authorize, payoutFingerprint, SignerError, validatePayout } from "../src/validation.mjs";
 import * as Nimiq from "@nimiq/core";
 
@@ -92,4 +93,9 @@ test("derives a treasury key from recovery words", () => {
     derivePrivateKeyForAddress(mnemonic, address),
     extendedKey.privateKey.toHex(),
   );
+});
+
+test("reads a recovery secret from a piped standard-input stream", async () => {
+  const secret = "word one word two";
+  assert.equal(await readUtf8Stream(Readable.from([secret])), secret);
 });

@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import * as Nimiq from "@nimiq/core";
 
@@ -32,10 +31,18 @@ export function derivePrivateKeyForAddress(secret, expectedAddress, maxAccounts 
   throw new Error(`The recovery phrase did not derive ${expectedAddress} in the first ${maxAccounts} accounts.`);
 }
 
+export async function readUtf8Stream(stream) {
+  let value = "";
+  for await (const chunk of stream) {
+    value += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  }
+  return value;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const expectedAddress = process.argv[2];
-    const secret = await readFile(0, "utf8");
+    const secret = await readUtf8Stream(process.stdin);
     process.stdout.write(derivePrivateKeyForAddress(secret, expectedAddress));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : "Unable to derive treasury key."}\n`);
