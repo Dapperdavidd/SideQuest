@@ -927,6 +927,253 @@ async fn find_active_intent(
     .map_err(|_| FundingError::Database)
 }
 
+#[derive(Debug, FromRow)]
+struct PendingPayout {
+    id: Uuid,
+    amount_luna: i64,
+    destination_address: String,
+    idempotency_key: String,
+}
+
+#[derive(Debug, FromRow)]
+struct SubmittedPayout {
+    id: Uuid,
+    amount_luna: i64,
+    destination_address: String,
+    transaction_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SignerReceipt {
+    idempotency_key: String,
+    transaction_hash: String,
+    sender: String,
+    recipient: String,
+    value_luna: i64,
+    reference: String,
+    network: String,
+}
+
+#[derive(Debug, Error)]
+enum PayoutWorkerError {
+    #[error("payout database operation failed")]
+    Database,
+    #[error("payout signer is unavailable")]
+    SignerUnavailable,
+    #[error("payout signer returned a mismatched receipt")]
+    SignerMismatch,
+    #[error("payout verifier is unavailable")]
+    VerifierUnavailable,
+    #[error("payout verifier returned a mismatched transaction")]
+    VerificationMismatch,
+}
+
+pub async fn run_payout_worker(state: AppState) {
+    let (Some(payment_config), Some(signer_config)) =
+        (state.payments.clone(), state.payout_signer.clone())
+    else {
+        return;
+    };
+    tracing::info!("automatic TestAlbatross payout worker enabled");
+    loop {
+        let mut handled_work = false;
+        match dispatch_next_payout(&state, &payment_config, &signer_config).await {
+            Ok(dispatched) => handled_work |= dispatched,
+            Err(error) => tracing::warn!(%error, "payout dispatch attempt failed"),
+        }
+        match reconcile_next_payout(&state, &payment_config).await {
+            Ok(reconciled) => handled_work |= reconciled,
+            Err(error) => tracing::warn!(%error, "payout reconciliation attempt failed"),
+        }
+        actix_web::rt::time::sleep(StdDuration::from_secs(if handled_work { 1 } else { 10 })).await;
+    }
+}
+
+async fn dispatch_next_payout(
+    state: &AppState,
+    payment_config: &crate::PaymentConfig,
+    signer_config: &crate::PayoutSignerConfig,
+) -> Result<bool, PayoutWorkerError> {
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| PayoutWorkerError::Database)?;
+    let payout = sqlx::query_as::<_, PendingPayout>(
+        r#"
+        select id, amount_minor as amount_luna, destination_address, idempotency_key
+        from public.payouts
+        where status = 'PENDING'
+        order by created_at, id
+        for update skip locked
+        limit 1
+        "#,
+    )
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| PayoutWorkerError::Database)?;
+    let Some(payout) = payout else {
+        transaction
+            .rollback()
+            .await
+            .map_err(|_| PayoutWorkerError::Database)?;
+        return Ok(false);
+    };
+    let reference = payout_reference(payout.id);
+    let client = reqwest::Client::builder()
+        .timeout(StdDuration::from_secs(20))
+        .build()
+        .map_err(|_| PayoutWorkerError::SignerUnavailable)?;
+    let response = client
+        .post(format!("{}/payouts", signer_config.url))
+        .bearer_auth(&signer_config.token)
+        .json(&serde_json::json!({
+            "idempotency_key": payout.idempotency_key,
+            "recipient": payout.destination_address,
+            "value_luna": payout.amount_luna,
+            "reference": reference,
+            "network": "testnet",
+        }))
+        .send()
+        .await
+        .map_err(|_| PayoutWorkerError::SignerUnavailable)?;
+    if !response.status().is_success() {
+        return Err(PayoutWorkerError::SignerUnavailable);
+    }
+    let receipt = response
+        .json::<SignerReceipt>()
+        .await
+        .map_err(|_| PayoutWorkerError::SignerUnavailable)?;
+    verify_signer_receipt(&receipt, &payout, payment_config, &reference)?;
+
+    sqlx::query(
+        r#"
+        update public.payouts
+        set status = 'SUBMITTED',
+            provider_reference = $2,
+            transaction_hash = $3,
+            submitted_at = coalesce(submitted_at, now()),
+            failure_reason = null,
+            updated_at = now()
+        where id = $1 and status = 'PENDING'
+        "#,
+    )
+    .bind(payout.id)
+    .bind(&receipt.idempotency_key)
+    .bind(&receipt.transaction_hash)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| PayoutWorkerError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| PayoutWorkerError::Database)?;
+    tracing::info!(payout_id = %payout.id, transaction_hash = %receipt.transaction_hash, "NIM payout submitted");
+    Ok(true)
+}
+
+fn verify_signer_receipt(
+    receipt: &SignerReceipt,
+    payout: &PendingPayout,
+    config: &crate::PaymentConfig,
+    reference: &str,
+) -> Result<(), PayoutWorkerError> {
+    if receipt.idempotency_key != payout.idempotency_key
+        || receipt.network != "testnet"
+        || normalize_nimiq_address(&receipt.sender)
+            != normalize_nimiq_address(&config.treasury_address)
+        || normalize_nimiq_address(&receipt.recipient)
+            != normalize_nimiq_address(&payout.destination_address)
+        || receipt.value_luna != payout.amount_luna
+        || receipt.reference != reference
+        || receipt.transaction_hash.is_empty()
+        || receipt.transaction_hash.len() > 128
+        || !receipt
+            .transaction_hash
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(PayoutWorkerError::SignerMismatch);
+    }
+    Ok(())
+}
+
+async fn reconcile_next_payout(
+    state: &AppState,
+    config: &crate::PaymentConfig,
+) -> Result<bool, PayoutWorkerError> {
+    let payout = sqlx::query_as::<_, SubmittedPayout>(
+        r#"
+        select id, amount_minor as amount_luna, destination_address,
+               transaction_hash
+        from public.payouts
+        where status = 'SUBMITTED' and transaction_hash is not null
+        order by submitted_at, id
+        limit 1
+        "#,
+    )
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| PayoutWorkerError::Database)?;
+    let Some(payout) = payout else {
+        return Ok(false);
+    };
+    let receipt = verifier_lookup(config, &payout.transaction_hash)
+        .await
+        .map_err(|_| PayoutWorkerError::VerifierUnavailable)?;
+    verify_payout_receipt(&receipt, &payout, config)?;
+
+    let transitioned = if receipt.state == "confirmed"
+        && receipt.confirmations >= config.min_confirmations
+    {
+        sqlx::query(
+            "update public.payouts set status = 'CONFIRMED', confirmed_at = coalesce(confirmed_at, now()), failure_reason = null, updated_at = now() where id = $1 and status = 'SUBMITTED'",
+        )
+        .bind(payout.id)
+        .execute(&state.database)
+        .await
+        .map_err(|_| PayoutWorkerError::Database)?;
+        tracing::info!(payout_id = %payout.id, transaction_hash = %payout.transaction_hash, "NIM payout confirmed");
+        true
+    } else if matches!(receipt.state.as_str(), "invalidated" | "expired") {
+        sqlx::query(
+            "update public.payouts set status = 'FAILED', failure_reason = $2, updated_at = now() where id = $1 and status = 'SUBMITTED'",
+        )
+        .bind(payout.id)
+        .bind(format!("TestAlbatross transaction became {}", receipt.state))
+        .execute(&state.database)
+        .await
+        .map_err(|_| PayoutWorkerError::Database)?;
+        true
+    } else {
+        false
+    };
+    Ok(transitioned)
+}
+
+fn verify_payout_receipt(
+    receipt: &VerifiedTransaction,
+    payout: &SubmittedPayout,
+    config: &crate::PaymentConfig,
+) -> Result<(), PayoutWorkerError> {
+    if receipt.network != "TestAlbatross"
+        || normalize_nimiq_address(&receipt.sender)
+            != normalize_nimiq_address(&config.treasury_address)
+        || normalize_nimiq_address(&receipt.recipient)
+            != normalize_nimiq_address(&payout.destination_address)
+        || receipt.value_luna != payout.amount_luna
+        || receipt.reference != payout_reference(payout.id)
+        || receipt.transaction_hash != payout.transaction_hash
+    {
+        return Err(PayoutWorkerError::VerificationMismatch);
+    }
+    Ok(())
+}
+
+fn payout_reference(payout_id: Uuid) -> String {
+    format!("SQP:{}", payout_id.simple())
+}
+
 fn funding_reference(intent_id: Uuid) -> String {
     format!("SQF:{}", intent_id.simple())
 }
@@ -987,6 +1234,14 @@ pub fn format_nimiq_address(address: &str) -> Option<String> {
             .collect::<Vec<_>>()
             .join(" "),
     )
+}
+
+fn normalize_nimiq_address(address: &str) -> String {
+    address
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .map(|character| character.to_ascii_uppercase())
+        .collect()
 }
 
 pub fn transition_payment(
@@ -1138,5 +1393,82 @@ mod tests {
             verify_receipt(&receipt, &verification_context()),
             Err(FundingError::TransactionMismatch)
         ));
+    }
+
+    #[test]
+    fn accepts_an_exact_signer_payout_receipt() {
+        let payout = PendingPayout {
+            id: Uuid::new_v4(),
+            amount_luna: 100_000,
+            destination_address: "NQ24 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0".to_string(),
+            idempotency_key: "payout:quest:winner".to_string(),
+        };
+        let reference = payout_reference(payout.id);
+        let receipt = SignerReceipt {
+            idempotency_key: payout.idempotency_key.clone(),
+            transaction_hash: "abcdef123456".to_string(),
+            sender: payout.destination_address.clone(),
+            recipient: payout.destination_address.clone(),
+            value_luna: payout.amount_luna,
+            reference: reference.clone(),
+            network: "testnet".to_string(),
+        };
+        assert!(verify_signer_receipt(&receipt, &payout, &payment_config(), &reference).is_ok());
+    }
+
+    #[test]
+    fn rejects_a_signer_receipt_with_a_different_amount() {
+        let payout = PendingPayout {
+            id: Uuid::new_v4(),
+            amount_luna: 100_000,
+            destination_address: "NQ24 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0".to_string(),
+            idempotency_key: "payout:quest:winner".to_string(),
+        };
+        let reference = payout_reference(payout.id);
+        let receipt = SignerReceipt {
+            idempotency_key: payout.idempotency_key.clone(),
+            transaction_hash: "abcdef123456".to_string(),
+            sender: payout.destination_address.clone(),
+            recipient: payout.destination_address.clone(),
+            value_luna: payout.amount_luna - 1,
+            reference: reference.clone(),
+            network: "testnet".to_string(),
+        };
+        assert!(matches!(
+            verify_signer_receipt(&receipt, &payout, &payment_config(), &reference),
+            Err(PayoutWorkerError::SignerMismatch)
+        ));
+    }
+
+    #[test]
+    fn independently_matches_a_submitted_payout_receipt() {
+        let payout = SubmittedPayout {
+            id: Uuid::new_v4(),
+            amount_luna: 100_000,
+            destination_address: "NQ24 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0".to_string(),
+            transaction_hash: "abcdef123456".to_string(),
+        };
+        let receipt = VerifiedTransaction {
+            transaction_hash: payout.transaction_hash.clone(),
+            state: "confirmed".to_string(),
+            sender: payout.destination_address.clone(),
+            recipient: payout.destination_address.clone(),
+            value_luna: payout.amount_luna,
+            reference: payout_reference(payout.id),
+            network: "TestAlbatross".to_string(),
+            confirmations: 2,
+            block_height: Some(42),
+        };
+        assert!(verify_payout_receipt(&receipt, &payout, &payment_config()).is_ok());
+    }
+
+    fn payment_config() -> crate::PaymentConfig {
+        crate::PaymentConfig {
+            network: "testnet".to_string(),
+            treasury_address: "NQ24 VU9V 76NV SRFA QVGJ JE50 139Q 3U38 DUN0".to_string(),
+            min_confirmations: 2,
+            verifier_url: "http://127.0.0.1:8090".to_string(),
+            verifier_token: None,
+        }
     }
 }

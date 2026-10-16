@@ -62,6 +62,8 @@ The setup prompt validates that the entered testnet private key derives the conf
 
 The signer binds only to `127.0.0.1:8091`. It persists signed payout transactions to an ignored, owner-only local ledger before broadcasting, so an API retry reuses the exact same transaction.
 
+When `PAYOUT_SIGNER_URL` and `PAYOUT_SIGNER_TOKEN` are configured, the API starts its payout worker automatically. Keep the signer and the independent verifier running alongside the API. The worker claims one pending payout under a database row lock, validates the complete signer receipt before recording `SUBMITTED`, and uses the independent verifier before recording `CONFIRMED`.
+
 Run the API:
 
 ```bash

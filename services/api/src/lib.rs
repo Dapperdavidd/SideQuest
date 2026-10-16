@@ -22,10 +22,17 @@ pub struct PaymentConfig {
 }
 
 #[derive(Clone)]
+pub struct PayoutSignerConfig {
+    pub url: String,
+    pub token: String,
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub database: PgPool,
     pub auth: AuthVerifier,
     pub payments: Option<PaymentConfig>,
+    pub payout_signer: Option<PayoutSignerConfig>,
 }
 
 #[derive(Serialize)]

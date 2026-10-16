@@ -12,6 +12,8 @@ SideQuest does not mark a monetary quest funded because a browser reports that a
 - Authenticated participants can register one checksum-validated TestAlbatross payout destination. Rewarded submissions snapshot that address when the official entry is accepted, so changing a profile later cannot redirect an already-earned reward.
 - Quest finalization atomically creates one immutable reward allocation and one idempotent pending payout for each winner. The pending records deliberately remain unsigned until the isolated signer is configured.
 - The local isolated signer is implemented as a loopback-only service. It validates a bearer token, checks that its Keychain-provided private key derives the configured treasury address, serializes each signed transaction into an owner-only durable ledger before broadcast, and rejects idempotency-key reuse with changed payout details.
+- The API payout worker is enabled only when both the verified funding configuration and local signer configuration are valid. It holds a row lock while making an idempotent signer request, then independently checks signer identity, treasury sender, recipient snapshot, integer-Luna amount, payout reference, network, and transaction-hash shape before recording `SUBMITTED`.
+- Submitted payouts are read back through the separate chain verifier. `CONFIRMED` is recorded only after the verifier matches the transaction hash, treasury sender, destination, amount, `SQP:` reference, TestAlbatross network, and configured confirmation depth. Invalidated or expired transactions move to `FAILED` with a visible reason.
 
 References:
 
@@ -53,9 +55,10 @@ USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supp
 5. The client submits only the resulting transaction hash to the API; client success remains `PENDING`, never `CONFIRMED`.
 6. The verifier independently reads the chain and compares network, recipient, amount, memo/reference, and confirmation depth.
 7. A matching transaction atomically confirms the intent, funds the reward pool, and opens the quest. Replays return the existing intent/transaction result.
-8. Finalization creates one allocation and pending payout per winner using the destination locked with the entry. The signing service submits each payout with its immutable idempotency key.
-9. The verifier independently confirms payouts before the UI displays them as paid.
-10. Expiry, underpayment, overpayment, failed payout, refund, and reconciliation paths remain explicit states with audit records.
+8. Finalization creates one allocation and pending payout per winner using the destination locked with the entry. The API worker sends the isolated signer the immutable idempotency key and an `SQP:` reference derived from the payout record.
+9. The signer persists the signed transaction before broadcast, and the API validates its response before recording `SUBMITTED`.
+10. The verifier independently confirms sender, destination, amount, reference, network, hash, and depth before the API records `CONFIRMED` and the UI displays the reward as paid.
+11. Expiry, underpayment, overpayment, failed payout, refund, and reconciliation paths remain explicit states with audit records.
 
 ## Environment placeholders
 

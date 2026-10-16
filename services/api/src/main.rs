@@ -2,7 +2,10 @@ use std::io;
 
 use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware::Logger, web};
-use api::{AppState, PaymentConfig, auth::AuthVerifier, configure_routes};
+use api::{
+    AppState, PaymentConfig, PayoutSignerConfig, auth::AuthVerifier, configure_routes,
+    payments::run_payout_worker,
+};
 use sqlx::postgres::PgPoolOptions;
 
 #[actix_web::main]
@@ -41,11 +44,20 @@ async fn main() -> io::Result<()> {
     if payments.is_none() {
         tracing::warn!("Nimiq funding is disabled because its public configuration is incomplete");
     }
+    let payout_signer = payout_signer_config_from_environment();
+    if payout_signer.is_none() {
+        tracing::warn!(
+            "automatic NIM payouts are disabled because the local signer is not configured"
+        );
+    }
     let state = AppState {
         database,
         auth: AuthVerifier::new(jwks_url),
         payments,
+        payout_signer,
     };
+    let payout_worker_state = state.clone();
+    actix_web::rt::spawn(async move { run_payout_worker(payout_worker_state).await });
 
     tracing::info!(%host, %port, "starting SideQuest API");
 
@@ -59,6 +71,18 @@ async fn main() -> io::Result<()> {
     .bind((host, port))?
     .run()
     .await
+}
+
+fn payout_signer_config_from_environment() -> Option<PayoutSignerConfig> {
+    let url = std::env::var("PAYOUT_SIGNER_URL").ok()?;
+    let token = std::env::var("PAYOUT_SIGNER_TOKEN").ok()?;
+    if !url.starts_with("http://127.0.0.1:") || token.len() < 32 {
+        return None;
+    }
+    Some(PayoutSignerConfig {
+        url: url.trim_end_matches('/').to_string(),
+        token,
+    })
 }
 
 fn payment_config_from_environment() -> Option<PaymentConfig> {
