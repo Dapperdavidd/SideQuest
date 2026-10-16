@@ -23,17 +23,33 @@ import {
 } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 
-export default function DiscoverPage() {
+type DiscoverPageProps = {
+  searchParams: Promise<{ q?: string; type?: string }>;
+};
+
+const filters = [
+  ["All", ""],
+  ["Friends", "FRIENDS"],
+  ["Bounties", "BOUNTY"],
+  ["Explore", "EXPLORE"],
+] as const;
+
+export default function DiscoverPage({ searchParams }: DiscoverPageProps) {
   return (
     <Suspense fallback={<main className="min-h-screen animate-pulse bg-[#101310]" />}>
-      <DiscoverExperience />
+      <DiscoverExperience searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function DiscoverExperience() {
+async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
+  const requested = await searchParams;
+  const search = requested.q?.trim().slice(0, 80) ?? "";
+  const questType = ["FRIENDS", "BOUNTY", "EXPLORE"].includes(requested.type ?? "")
+    ? requested.type as Quest["quest_type"]
+    : undefined;
   const viewerPromise = getViewer();
-  const questsPromise = listQuests().catch(() => null);
+  const questsPromise = listQuests({ search, questType }).catch(() => null);
   const [viewer, quests] = await Promise.all([viewerPromise, questsPromise]);
   const firstName = viewer?.displayName.split(/\s+/)[0] || "Explorer";
   const initial = firstName.charAt(0).toUpperCase();
@@ -56,18 +72,18 @@ async function DiscoverExperience() {
         <section className="min-w-0">
           <header className="flex items-center gap-4 border-b border-white/10 px-5 py-4 sm:px-8">
             <div className="lg:hidden"><Logo inverse /></div>
-            <label className="hidden max-w-md flex-1 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 sm:flex"><Search size={17} className="text-white/40" /><span className="sr-only">Search quests</span><input className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35" placeholder="Search quests, creators, or places…" /></label>
+            <form action="/discover" className="hidden max-w-md flex-1 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 sm:flex"><Search size={17} className="text-white/40" /><label htmlFor="discover-search" className="sr-only">Search quests</label><input id="discover-search" name="q" defaultValue={search} maxLength={80} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35" placeholder="Search quests or creators…" />{questType ? <input type="hidden" name="type" value={questType} /> : null}<button type="submit" className="text-xs font-bold text-accent">Search</button></form>
             <button aria-label="Notifications" className="ml-auto grid h-10 w-10 place-items-center rounded-full border border-white/10"><Bell size={18} /></button>
             <Link href={viewer ? "/profile" : "/auth"} aria-label={viewer ? "Open profile" : "Sign in"} className="grid h-10 w-10 place-items-center rounded-full bg-accent font-display font-bold text-dark">{initial}</Link>
           </header>
           <div className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="min-w-0 px-5 py-7 sm:px-8">
               <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-white/45">{viewer ? `Welcome back, ${firstName}` : "Browse freely as a guest"}</p><h1 className="mt-1 font-display text-3xl font-bold tracking-tight">What will you do today?</h1></div><Link href={viewer ? "/create" : "/auth?next=/create"} className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">{viewer ? "Create a quest" : "Sign in to create"}</Link></div>
-              <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{["All", "Friends", "Bounties", "Explore", "Nearby"].map((filter, index) => <button key={filter} className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${index === 0 ? "bg-accent text-dark" : "border border-white/10 text-white/60"}`}>{filter}</button>)}</div>
+              <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{filters.map(([label, value]) => { const selected = (questType ?? "") === value; const params = new URLSearchParams(); if (search) params.set("q", search); if (value) params.set("type", value); return <Link key={label} href={`/discover${params.size ? `?${params.toString()}` : ""}`} className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${selected ? "bg-accent text-dark" : "border border-white/10 text-white/60"}`}>{label}</Link>; })}</div>
 
               {featured ? <FeaturedQuest quest={featured} /> : null}
 
-              <div className="mt-8 flex items-center justify-between"><h2 className="font-display text-xl font-bold">Open quests</h2>{quests?.length ? <span className="text-sm text-white/50">{quests.length} live</span> : null}</div>
+              <div className="mt-8 flex items-center justify-between"><div><h2 className="font-display text-xl font-bold">{search ? `Results for “${search}”` : questType ? `${filters.find(([, value]) => value === questType)?.[0]} quests` : "Open quests"}</h2>{(search || questType) ? <Link href="/discover" className="mt-1 inline-block text-xs font-semibold text-accent">Clear filters</Link> : null}</div>{quests?.length ? <span className="text-sm text-white/50">{quests.length} found</span> : null}</div>
               {quests === null ? (
                 <div className="mt-4 rounded-[1.25rem] border border-[#ffcf5a]/25 bg-[#ffcf5a]/10 p-6"><h3 className="font-bold text-[#ffe3a0]">The quest service is taking a breather.</h3><p className="mt-2 text-sm leading-6 text-white/55">Your account is fine. Refresh in a moment to reconnect to the live feed.</p></div>
               ) : quests.length ? (

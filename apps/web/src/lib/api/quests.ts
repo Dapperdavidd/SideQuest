@@ -116,8 +116,12 @@ export function apiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
-export async function listQuests(): Promise<Quest[]> {
-  const response = await fetch(apiUrl("/quests"), { cache: "no-store" });
+export async function listQuests(filters: { search?: string; questType?: Quest["quest_type"] } = {}): Promise<Quest[]> {
+  const query = new URLSearchParams();
+  if (filters.search?.trim()) query.set("search", filters.search.trim());
+  if (filters.questType) query.set("quest_type", filters.questType);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  const response = await fetch(apiUrl(`/quests${suffix}`), { cache: "no-store" });
   if (!response.ok) throw new Error("Unable to load quests right now.");
   return response.json() as Promise<Quest[]>;
 }

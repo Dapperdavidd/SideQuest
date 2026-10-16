@@ -113,6 +113,18 @@ paths:
             type: integer
             minimum: 1
             maximum: 50
+        - in: query
+          name: search
+          description: Case-insensitive title, description, or creator search.
+          schema:
+            type: string
+            maxLength: 80
+        - in: query
+          name: quest_type
+          description: Restrict discovery to one SideQuest experience.
+          schema:
+            type: string
+            enum: [FRIENDS, BOUNTY, EXPLORE]
       responses:
         "200":
           description: Public quests ordered by publish time

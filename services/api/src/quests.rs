@@ -126,6 +126,38 @@ fn default_visibility() -> String {
 #[derive(Debug, Deserialize)]
 pub struct QuestListQuery {
     limit: Option<i64>,
+    search: Option<String>,
+    quest_type: Option<String>,
+}
+
+impl QuestListQuery {
+    fn normalized_search(&self) -> Result<Option<String>, QuestError> {
+        let search = self
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if search.is_some_and(|value| value.chars().count() > 80) {
+            return Err(QuestError::InvalidQuest);
+        }
+        Ok(search.map(str::to_string))
+    }
+
+    fn normalized_quest_type(&self) -> Result<Option<String>, QuestError> {
+        let quest_type = self
+            .quest_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_uppercase);
+        if quest_type
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "FRIENDS" | "BOUNTY" | "EXPLORE"))
+        {
+            return Err(QuestError::InvalidQuest);
+        }
+        Ok(quest_type)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -277,6 +309,8 @@ pub async fn list_quests(
     query: web::Query<QuestListQuery>,
 ) -> Result<web::Json<Vec<Quest>>, QuestError> {
     let limit = query.limit.unwrap_or(20).clamp(1, 50);
+    let search = query.normalized_search()?;
+    let quest_type = query.normalized_quest_type()?;
     let quests = sqlx::query_as::<_, Quest>(
         r#"
         select q.id,
@@ -310,11 +344,21 @@ pub async fn list_quests(
         join public.users u on u.id = q.creator_id
         where q.visibility = 'PUBLIC'
           and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
+          and ($2::text is null or q.quest_type::text = $2)
+          and (
+            $3::text is null
+            or q.title ilike '%' || $3 || '%'
+            or q.description ilike '%' || $3 || '%'
+            or u.username ilike '%' || $3 || '%'
+            or u.display_name ilike '%' || $3 || '%'
+          )
         order by q.published_at desc nulls last, q.created_at desc
         limit $1
         "#,
     )
     .bind(limit)
+    .bind(quest_type)
+    .bind(search)
     .fetch_all(&state.database)
     .await
     .map_err(|_| QuestError::Database)?;
@@ -713,5 +757,45 @@ mod tests {
         quest.reward_currency = Some("USD".to_string());
         quest.settlement_asset = Some("NIM".to_string());
         assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
+    fn normalizes_discover_filters() {
+        let query = QuestListQuery {
+            limit: None,
+            search: Some("  sunset walk  ".to_string()),
+            quest_type: Some("explore".to_string()),
+        };
+        assert_eq!(
+            query.normalized_search().unwrap().as_deref(),
+            Some("sunset walk")
+        );
+        assert_eq!(
+            query.normalized_quest_type().unwrap().as_deref(),
+            Some("EXPLORE")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_discover_filters() {
+        let invalid_type = QuestListQuery {
+            limit: None,
+            search: None,
+            quest_type: Some("jobs".to_string()),
+        };
+        assert!(matches!(
+            invalid_type.normalized_quest_type(),
+            Err(QuestError::InvalidQuest)
+        ));
+
+        let long_search = QuestListQuery {
+            limit: None,
+            search: Some("x".repeat(81)),
+            quest_type: None,
+        };
+        assert!(matches!(
+            long_search.normalized_search(),
+            Err(QuestError::InvalidQuest)
+        ));
     }
 }
