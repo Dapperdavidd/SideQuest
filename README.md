@@ -54,7 +54,7 @@ Configure the loopback-only payout signer once on macOS:
 ./scripts/configure-local-signer.sh
 ```
 
-The setup prompt validates that the entered testnet private key derives the configured SideQuest treasury address. It stores the key and a generated service token in macOS Keychain; the private key is never written to `.env` or the repository. Start the signer in its own terminal:
+The silent setup prompt accepts either the treasury recovery phrase or its 64-character private key. It supports Nimiq recovery words and the standard `m/44'/242'/…'/0'` account path, then validates that the locally derived key matches the configured SideQuest treasury address. It stores only the matched private key and a generated service token in macOS Keychain; neither recovery words nor the private key are written to `.env` or the repository. Start the signer in its own terminal:
 
 ```bash
 ./scripts/start-local-signer.sh

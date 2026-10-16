@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PayoutLedger } from "../src/ledger.mjs";
+import { derivePrivateKeyForAddress } from "../src/derive-key.mjs";
 import { authorize, payoutFingerprint, SignerError, validatePayout } from "../src/validation.mjs";
+import * as Nimiq from "@nimiq/core";
 
 const valid = {
   idempotency_key: "payout:quest:winner",
@@ -70,4 +72,24 @@ test("persists a signed transaction before submission and reuses it", async () =
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("accepts a raw private key only when it matches the treasury", () => {
+  const privateKey = Nimiq.PrivateKey.generate();
+  const address = Nimiq.KeyPair.derive(privateKey).toAddress().toUserFriendlyAddress();
+  assert.equal(derivePrivateKeyForAddress(privateKey.toHex(), address), privateKey.toHex());
+  assert.throws(
+    () => derivePrivateKeyForAddress(privateKey.toHex(), valid.recipient),
+    /not the configured treasury/,
+  );
+});
+
+test("derives a treasury key from recovery words", () => {
+  const mnemonic = Nimiq.Entropy.generate().toMnemonic().join(" ");
+  const extendedKey = Nimiq.MnemonicUtils.mnemonicToExtendedPrivateKey(mnemonic);
+  const address = extendedKey.toAddress().toUserFriendlyAddress();
+  assert.equal(
+    derivePrivateKeyForAddress(mnemonic, address),
+    extendedKey.privateKey.toHex(),
+  );
 });

@@ -13,26 +13,13 @@ if ! command -v security >/dev/null || ! command -v openssl >/dev/null; then
   exit 1
 fi
 
-print "Enter the dedicated TestAlbatross treasury private key."
-print "It stays in macOS Keychain and is never written to the repository or .env."
-read -r -s "private_key?32-byte private key (64 hex characters): "
+print "Enter the dedicated TestAlbatross treasury recovery phrase or private key."
+print "It stays local, is converted in memory, and is never written to the repository or .env."
+read -r -s "wallet_secret?Recovery words or 64-character private key: "
 print
-if (( ${#private_key} != 64 )) || [[ "$private_key" == *[^0-9A-Fa-f]* ]]; then
-  print -u2 "The private key must contain exactly 64 hexadecimal characters."
-  exit 1
-fi
-
 cd "$repo_root/services/nimiq-signer"
-derived_address=$(PAYOUT_SIGNER_PRIVATE_KEY="$private_key" node --import "$repo_root/services/nimiq-signer/src/node-globals.mjs" --input-type=module -e '
-  const Nimiq = await import("@nimiq/core");
-  const key = Nimiq.PrivateKey.fromHex(process.env.PAYOUT_SIGNER_PRIVATE_KEY);
-  process.stdout.write(Nimiq.KeyPair.derive(key).toAddress().toUserFriendlyAddress());
-')
-if [[ "$derived_address" != "$treasury_address" ]]; then
-  unset private_key
-  print -u2 "That key derives $derived_address, not the configured SideQuest treasury."
-  exit 1
-fi
+private_key=$(print -rn -- "$wallet_secret" | node --import "$repo_root/services/nimiq-signer/src/node-globals.mjs" "$repo_root/services/nimiq-signer/src/derive-key.mjs" "$treasury_address")
+unset wallet_secret
 
 shared_token=$(openssl rand -hex 32)
 security add-generic-password -U -a "$keychain_account" -s "$key_service" -w "$private_key" >/dev/null
@@ -62,5 +49,5 @@ upsert_env "PAYOUT_SIGNER_TOKEN" "$shared_token"
 upsert_env "PAYOUT_SIGNER_LEDGER_PATH" ".runtime/payout-signer-ledger.json"
 unset shared_token
 
-print "Local payout signer configured for $derived_address."
+print "Local payout signer configured for $treasury_address."
 print "The private key and signer token are stored in macOS Keychain."

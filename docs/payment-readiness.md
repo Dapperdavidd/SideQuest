@@ -32,7 +32,7 @@ The app needs one explicit settlement model:
 
 Do not place a treasury private key, seed phrase, or raw signing material in `.env`, Supabase, the browser bundle, Flutter assets, source control, or chat.
 
-For the local competition setup, `scripts/configure-local-signer.sh` accepts the private key through a silent terminal prompt and stores it in macOS Keychain. `scripts/start-local-signer.sh` retrieves it only into the signer process environment. The generated API-to-signer token is stored in Keychain and copied into the ignored local `.env` for the API client.
+For the local competition setup, `scripts/configure-local-signer.sh` accepts either Nimiq recovery words or a raw private key through a silent terminal prompt. Recovery words are converted locally using the official SDK, checking the direct wallet key and the standard `m/44'/242'/…'/0'` account path until the configured treasury address matches. Only that matched private key is stored in macOS Keychain. `scripts/start-local-signer.sh` retrieves it only into the signer process environment. The generated API-to-signer token is stored in Keychain and copied into the ignored local `.env` for the API client.
 
 ## Inputs needed for the recommended testnet path
 
