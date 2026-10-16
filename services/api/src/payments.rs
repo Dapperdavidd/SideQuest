@@ -931,7 +931,7 @@ fn funding_reference(intent_id: Uuid) -> String {
     format!("SQF:{}", intent_id.simple())
 }
 
-fn format_luna(amount_luna: i64) -> String {
+pub(crate) fn format_luna(amount_luna: i64) -> String {
     let nim = amount_luna / 100_000;
     let luna = amount_luna % 100_000;
     if luna == 0 {

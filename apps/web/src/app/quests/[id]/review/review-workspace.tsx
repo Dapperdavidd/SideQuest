@@ -64,7 +64,7 @@ export function ReviewWorkspace({ quest, initialEntries, initialSignedUrls }: { 
     }
   }
 
-  if (finalized) return <div className="rounded-[1.5rem] border border-line bg-white p-8 text-center"><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-accent-soft"><Trophy size={28} /></span><h1 className="mt-5 font-display text-3xl font-bold">Quest finalized</h1><p className="mt-3 text-muted">{finalized.length ? `${finalized.length} winner${finalized.length === 1 ? "" : "s"} locked in.` : "The published result is locked in."}</p><Link href={`/quests/${quest.id}`} className="mt-6 inline-block rounded-full bg-accent px-6 py-3 font-bold text-dark">View public quest</Link></div>;
+  if (finalized) return <div className="rounded-[1.5rem] border border-line bg-white p-8 text-center"><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-accent-soft"><Trophy size={28} /></span><h1 className="mt-5 font-display text-3xl font-bold">Quest finalized</h1><p className="mt-3 text-muted">{finalized.length ? `${finalized.length} winner${finalized.length === 1 ? "" : "s"} locked in.` : "The published result is locked in."}</p><div className="mt-6 flex flex-wrap justify-center gap-3">{quest.reward_enabled ? <Link href={`/quests/${quest.id}/settlement`} className="inline-block rounded-full bg-dark px-6 py-3 font-bold text-white">Track payouts</Link> : null}<Link href={`/quests/${quest.id}`} className="inline-block rounded-full bg-accent px-6 py-3 font-bold text-dark">View public quest</Link></div></div>;
 
   return (
     <div>

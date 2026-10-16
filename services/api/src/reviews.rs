@@ -7,7 +7,7 @@ use sqlx::{FromRow, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{AppState, auth::AuthError};
+use crate::{AppState, auth::AuthError, payments::format_luna};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewedEntry {
@@ -119,6 +119,72 @@ pub struct FinalizedQuest {
     quest_id: Uuid,
     winner_entry_ids: Vec<Uuid>,
     status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct QuestSettlement {
+    quest_id: Uuid,
+    status: String,
+    reward_enabled: bool,
+    total_allocated_luna: i64,
+    total_allocated_nim: String,
+    payouts: Vec<CreatorPayout>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreatorPayout {
+    id: Uuid,
+    winner_position: i16,
+    recipient_username: String,
+    recipient_display_name: String,
+    amount_luna: i64,
+    amount_nim: String,
+    network: String,
+    destination_address: String,
+    status: String,
+    transaction_hash: Option<String>,
+    submitted_at: Option<DateTime<Utc>>,
+    confirmed_at: Option<DateTime<Utc>>,
+    failure_reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredCreatorPayout {
+    id: Uuid,
+    winner_position: i16,
+    recipient_username: String,
+    recipient_display_name: String,
+    amount_luna: i64,
+    network: String,
+    destination_address: String,
+    status: String,
+    transaction_hash: Option<String>,
+    submitted_at: Option<DateTime<Utc>>,
+    confirmed_at: Option<DateTime<Utc>>,
+    failure_reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+impl StoredCreatorPayout {
+    fn into_response(self) -> CreatorPayout {
+        CreatorPayout {
+            id: self.id,
+            winner_position: self.winner_position,
+            recipient_username: self.recipient_username,
+            recipient_display_name: self.recipient_display_name,
+            amount_luna: self.amount_luna,
+            amount_nim: format_luna(self.amount_luna),
+            network: self.network,
+            destination_address: self.destination_address,
+            status: self.status,
+            transaction_hash: self.transaction_hash,
+            submitted_at: self.submitted_at,
+            confirmed_at: self.confirmed_at,
+            failure_reason: self.failure_reason,
+            created_at: self.created_at,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -317,6 +383,77 @@ pub async fn review_entry(
         .map_err(|_| ReviewError::Database)?;
 
     Ok(HttpResponse::NoContent().finish())
+}
+
+#[get("/quests/{quest_id}/settlement")]
+pub async fn get_quest_settlement(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<web::Json<QuestSettlement>, ReviewError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quest_id = quest_id.into_inner();
+    let quest = sqlx::query(
+        "select creator_id, status::text as status, reward_enabled from public.quests where id = $1",
+    )
+    .bind(quest_id)
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| ReviewError::Database)?
+    .ok_or(ReviewError::NotFound)?;
+    let creator_id: Uuid = quest
+        .try_get("creator_id")
+        .map_err(|_| ReviewError::Database)?;
+    if creator_id != user.id {
+        return Err(ReviewError::NotCreator);
+    }
+
+    let rows = sqlx::query_as::<_, StoredCreatorPayout>(
+        r#"
+        select p.id,
+               qw.winner_position,
+               u.username as recipient_username,
+               u.display_name as recipient_display_name,
+               p.amount_minor as amount_luna,
+               p.network,
+               p.destination_address,
+               p.status::text as status,
+               p.transaction_hash,
+               p.submitted_at,
+               p.confirmed_at,
+               p.failure_reason,
+               p.created_at
+        from public.payouts p
+        join public.reward_allocations ra on ra.id = p.reward_allocation_id
+        join public.quest_winners qw on qw.id = ra.winner_id
+        join public.users u on u.id = p.recipient_id
+        where qw.quest_id = $1
+        order by qw.winner_position, p.id
+        "#,
+    )
+    .bind(quest_id)
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| ReviewError::Database)?;
+    let total_allocated_luna = rows
+        .iter()
+        .try_fold(0_i64, |total, payout| total.checked_add(payout.amount_luna))
+        .ok_or(ReviewError::Database)?;
+    let payouts = rows
+        .into_iter()
+        .map(StoredCreatorPayout::into_response)
+        .collect();
+
+    Ok(web::Json(QuestSettlement {
+        quest_id,
+        status: quest.try_get("status").map_err(|_| ReviewError::Database)?,
+        reward_enabled: quest
+            .try_get("reward_enabled")
+            .map_err(|_| ReviewError::Database)?,
+        total_allocated_luna,
+        total_allocated_nim: format_luna(total_allocated_luna),
+        payouts,
+    }))
 }
 
 #[post("/quests/{quest_id}/finalize")]

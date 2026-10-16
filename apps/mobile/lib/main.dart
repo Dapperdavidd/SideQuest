@@ -84,6 +84,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/quests/:id/settlement',
+        builder: (context, state) =>
+            QuestSettlementScreen(questId: state.pathParameters['id']!),
+      ),
+      GoRoute(
         path: '/auth',
         builder: (context, state) =>
             AuthScreen(next: state.uri.queryParameters['next'] ?? '/discover'),
@@ -382,6 +387,17 @@ class QuestRepository {
         .map((json) => PayoutSummary.fromJson(json as Map<String, dynamic>))
         .toList(growable: false);
   }
+
+  Future<QuestSettlement> getQuestSettlement(
+    String questId,
+    String accessToken,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/quests/$questId/settlement',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return QuestSettlement.fromJson(response.data!);
+  }
 }
 
 class PayoutDestination {
@@ -437,6 +453,69 @@ class PayoutSummary {
   final String? transactionHash;
   final String? failureReason;
   final DateTime createdAt;
+}
+
+class QuestSettlement {
+  const QuestSettlement({
+    required this.questId,
+    required this.status,
+    required this.rewardEnabled,
+    required this.totalAllocatedNim,
+    required this.payouts,
+  });
+
+  factory QuestSettlement.fromJson(Map<String, dynamic> json) =>
+      QuestSettlement(
+        questId: json['quest_id'] as String,
+        status: json['status'] as String,
+        rewardEnabled: json['reward_enabled'] as bool,
+        totalAllocatedNim: json['total_allocated_nim'] as String,
+        payouts: (json['payouts'] as List<dynamic>)
+            .map((item) => CreatorPayout.fromJson(item as Map<String, dynamic>))
+            .toList(growable: false),
+      );
+
+  final String questId;
+  final String status;
+  final bool rewardEnabled;
+  final String totalAllocatedNim;
+  final List<CreatorPayout> payouts;
+}
+
+class CreatorPayout {
+  const CreatorPayout({
+    required this.id,
+    required this.winnerPosition,
+    required this.recipientUsername,
+    required this.recipientDisplayName,
+    required this.amountNim,
+    required this.destinationAddress,
+    required this.status,
+    required this.transactionHash,
+    required this.failureReason,
+  });
+
+  factory CreatorPayout.fromJson(Map<String, dynamic> json) => CreatorPayout(
+    id: json['id'] as String,
+    winnerPosition: (json['winner_position'] as num).toInt(),
+    recipientUsername: json['recipient_username'] as String,
+    recipientDisplayName: json['recipient_display_name'] as String,
+    amountNim: json['amount_nim'] as String,
+    destinationAddress: json['destination_address'] as String,
+    status: json['status'] as String,
+    transactionHash: json['transaction_hash'] as String?,
+    failureReason: json['failure_reason'] as String?,
+  );
+
+  final String id;
+  final int winnerPosition;
+  final String recipientUsername;
+  final String recipientDisplayName;
+  final String amountNim;
+  final String destinationAddress;
+  final String status;
+  final String? transactionHash;
+  final String? failureReason;
 }
 
 class UserProfile {
@@ -601,6 +680,14 @@ final myPayoutsProvider = FutureProvider.autoDispose<List<PayoutSummary>>((
   if (session == null) return const [];
   return ref.watch(questRepositoryProvider).listMyPayouts(session.accessToken);
 });
+final questSettlementProvider = FutureProvider.autoDispose
+    .family<QuestSettlement, String>((ref, questId) {
+      final session = currentSession;
+      if (session == null) throw StateError('Authentication required');
+      return ref
+          .watch(questRepositoryProvider)
+          .getQuestSettlement(questId, session.accessToken);
+    });
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -2295,7 +2382,7 @@ class _ReviewQuestScreenState extends ConsumerState<ReviewQuestScreen> {
       ref.invalidate(questsProvider);
       ref.invalidate(questProvider(quest.id));
       if (!mounted) return;
-      await showDialog<void>(
+      final openSettlement = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
@@ -2307,14 +2394,25 @@ class _ReviewQuestScreenState extends ConsumerState<ReviewQuestScreen> {
                 : '$expectedWinners winner${expectedWinners == 1 ? '' : 's'} locked in. Reward settlement can now continue.',
           ),
           actions: [
+            if (quest.rewardEnabled)
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Track payouts'),
+              ),
             FilledButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Done'),
             ),
           ],
         ),
       );
-      if (mounted) context.go('/my-quests');
+      if (mounted) {
+        context.go(
+          openSettlement == true
+              ? '/quests/${quest.id}/settlement'
+              : '/my-quests',
+        );
+      }
     } on DioException catch (error) {
       final data = error.response?.data;
       setState(() {
@@ -4143,6 +4241,226 @@ String _shortDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+class QuestSettlementScreen extends ConsumerWidget {
+  const QuestSettlementScreen({required this.questId, super.key});
+
+  final String questId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.go('/auth?next=/quests/$questId/settlement');
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+
+    final settlement = ref.watch(questSettlementProvider(questId));
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Reward settlement'),
+        backgroundColor: background,
+      ),
+      body: SafeArea(
+        child: settlement.when(
+          loading: () =>
+              const Center(child: CircularProgressIndicator(color: ink)),
+          error: (_, _) => Center(
+            child: _QuestFeedError(
+              onRetry: () => ref.invalidate(questSettlementProvider(questId)),
+            ),
+          ),
+          data: (value) {
+            final confirmed = value.payouts
+                .where((payout) => payout.status == 'CONFIRMED')
+                .length;
+            return RefreshIndicator(
+              color: ink,
+              onRefresh: () =>
+                  ref.refresh(questSettlementProvider(questId).future),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+                children: [
+                  const Text(
+                    'CREATOR SETTLEMENT · NIMIQ TESTNET',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: ink,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Allocated to winners',
+                              style: TextStyle(color: Colors.white60),
+                            ),
+                            CircleAvatar(
+                              backgroundColor: accent,
+                              foregroundColor: ink,
+                              child: Icon(Icons.shield_outlined),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          '${value.totalAllocatedNim} NIM',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$confirmed/${value.payouts.length} payouts confirmed',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'Winner payouts',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 12),
+                  if (value.payouts.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        border: Border.all(color: line),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'Payouts appear after a funded quest is finalized with valid winners.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: muted, height: 1.45),
+                      ),
+                    )
+                  else
+                    ...value.payouts.map(_CreatorPayoutCard.new),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'This screen is read-only. A payout is confirmed only after independent TestAlbatross verification.',
+                    style: TextStyle(color: muted, fontSize: 11, height: 1.45),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _CreatorPayoutCard extends StatelessWidget {
+  const _CreatorPayoutCard(this.payout);
+
+  final CreatorPayout payout;
+
+  @override
+  Widget build(BuildContext context) {
+    final address = payout.destinationAddress;
+    final shortAddress = address.length > 20
+        ? '${address.substring(0, 9)}…${address.substring(address.length - 9)}'
+        : address;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: payout.status == 'CONFIRMED'
+                    ? accent
+                    : const Color(0xFFF0F1EC),
+                foregroundColor: ink,
+                child: Text(
+                  '${payout.winnerPosition}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      payout.recipientDisplayName,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      '@${payout.recipientUsername}',
+                      style: const TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '${payout.amountNim} NIM',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _PayoutStatus(status: payout.status),
+              Text(
+                shortAddress,
+                style: const TextStyle(color: muted, fontSize: 11),
+              ),
+              if (payout.transactionHash != null)
+                Text(
+                  'Tx ${payout.transactionHash!.substring(0, math.min(10, payout.transactionHash!.length))}…',
+                  style: const TextStyle(color: muted, fontSize: 11),
+                ),
+            ],
+          ),
+          if (payout.failureReason != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              payout.failureReason!,
+              style: const TextStyle(color: Color(0xFF8F2E1E), fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class WalletScreen extends ConsumerWidget {

@@ -68,7 +68,7 @@ export type PayoutSummary = {
   quest_title: string;
   amount_luna: number;
   amount_nim: string;
-  status: "PENDING" | "PROCESSING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "CANCELLED";
+  status: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
   network: "testnet";
   destination_address: string;
   transaction_hash: string | null;
@@ -76,6 +76,30 @@ export type PayoutSummary = {
   confirmed_at: string | null;
   failure_reason: string | null;
   created_at: string;
+};
+
+export type QuestSettlement = {
+  quest_id: string;
+  status: string;
+  reward_enabled: boolean;
+  total_allocated_luna: number;
+  total_allocated_nim: string;
+  payouts: Array<{
+    id: string;
+    winner_position: number;
+    recipient_username: string;
+    recipient_display_name: string;
+    amount_luna: number;
+    amount_nim: string;
+    network: string;
+    destination_address: string;
+    status: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
+    transaction_hash: string | null;
+    submitted_at: string | null;
+    confirmed_at: string | null;
+    failure_reason: string | null;
+    created_at: string;
+  }>;
 };
 
 export function apiUrl(path: string) {
@@ -115,6 +139,15 @@ export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]
   });
   if (!response.ok) throw new Error("Unable to load your payouts right now.");
   return response.json() as Promise<PayoutSummary[]>;
+}
+
+export async function getQuestSettlement(questId: string, accessToken: string): Promise<QuestSettlement> {
+  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(questId)}/settlement`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load this quest's settlement right now.");
+  return response.json() as Promise<QuestSettlement>;
 }
 
 export async function readApiError(response: Response, fallback: string) {

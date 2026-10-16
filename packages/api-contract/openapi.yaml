@@ -373,6 +373,24 @@ paths:
           description: Entries remain unreviewed, reward funding is unavailable, a payout snapshot is missing, or the quest is not reviewable
         "422":
           description: Winner selection violates the published method or count
+  /quests/{questId}/settlement:
+    get:
+      summary: Read reward allocation and payout status as the quest creator
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Creator-visible settlement state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestSettlement"
+        "403":
+          description: The authenticated user is not the quest creator
+        "404":
+          description: Quest not found
   /quests/validate:
     post:
       summary: Validate immutable quest participation rules
@@ -444,12 +462,89 @@ components:
           description: Exact decimal NIM representation derived from Luna
         status:
           type: string
-          enum: [PENDING, PROCESSING, SUBMITTED, CONFIRMED, FAILED, CANCELLED]
+          enum: [PENDING, SUBMITTED, CONFIRMED, FAILED]
         network:
           type: string
           enum: [testnet]
         destination_address:
           type: string
+        transaction_hash:
+          type: [string, "null"]
+        submitted_at:
+          type: [string, "null"]
+          format: date-time
+        confirmed_at:
+          type: [string, "null"]
+          format: date-time
+        failure_reason:
+          type: [string, "null"]
+        created_at:
+          type: string
+          format: date-time
+    QuestSettlement:
+      type: object
+      required:
+        - quest_id
+        - status
+        - reward_enabled
+        - total_allocated_luna
+        - total_allocated_nim
+        - payouts
+      properties:
+        quest_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        reward_enabled:
+          type: boolean
+        total_allocated_luna:
+          type: integer
+          minimum: 0
+        total_allocated_nim:
+          type: string
+        payouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreatorPayout"
+    CreatorPayout:
+      type: object
+      required:
+        - id
+        - winner_position
+        - recipient_username
+        - recipient_display_name
+        - amount_luna
+        - amount_nim
+        - network
+        - destination_address
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        winner_position:
+          type: integer
+          minimum: 1
+          maximum: 3
+        recipient_username:
+          type: string
+        recipient_display_name:
+          type: string
+        amount_luna:
+          type: integer
+          minimum: 1
+        amount_nim:
+          type: string
+        network:
+          type: string
+          enum: [testnet]
+        destination_address:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, SUBMITTED, CONFIRMED, FAILED]
         transaction_hash:
           type: [string, "null"]
         submitted_at:
