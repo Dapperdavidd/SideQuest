@@ -599,6 +599,11 @@ class UserProfile {
     required this.displayName,
     required this.bio,
     required this.avatarUrl,
+    required this.followersCount,
+    required this.followingCount,
+    required this.createdQuestsCount,
+    required this.completedQuestsCount,
+    required this.winsCount,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
@@ -607,6 +612,11 @@ class UserProfile {
     displayName: json['display_name'] as String,
     bio: json['bio'] as String?,
     avatarUrl: json['avatar_url'] as String?,
+    followersCount: (json['followers_count'] as num).toInt(),
+    followingCount: (json['following_count'] as num).toInt(),
+    createdQuestsCount: (json['created_quests_count'] as num).toInt(),
+    completedQuestsCount: (json['completed_quests_count'] as num).toInt(),
+    winsCount: (json['wins_count'] as num).toInt(),
   );
 
   final String id;
@@ -614,6 +624,11 @@ class UserProfile {
   final String displayName;
   final String? bio;
   final String? avatarUrl;
+  final int followersCount;
+  final int followingCount;
+  final int createdQuestsCount;
+  final int completedQuestsCount;
+  final int winsCount;
 }
 
 class EntryEvidence {
@@ -5461,12 +5476,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildProfile(UserProfile profile, String email) {
-    final quests = ref
-        .watch(myQuestsProvider)
-        .maybeWhen(data: (value) => value, orElse: () => const <MyQuest>[]);
-    final created = quests.where((quest) => quest.isCreator).length;
-    final active = quests.where((quest) => !quest.isCompleted).length;
-    final completed = quests.where((quest) => quest.isCompleted).length;
     return Column(
       children: [
         Text(
@@ -5497,12 +5506,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         const SizedBox(height: 24),
         Row(
           children: [
-            _ProfileStat(value: '$completed', label: 'Completed'),
+            _ProfileStat(
+              value: '${profile.completedQuestsCount}',
+              label: 'Completed',
+            ),
             const SizedBox(width: 8),
-            _ProfileStat(value: '$active', label: 'Active'),
+            _ProfileStat(value: '${profile.winsCount}', label: 'Wins'),
             const SizedBox(width: 8),
-            _ProfileStat(value: '$created', label: 'Created'),
+            _ProfileStat(
+              value: '${profile.followersCount}',
+              label: 'Followers',
+            ),
           ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '${profile.followingCount} following · ${profile.createdQuestsCount} created',
+          style: const TextStyle(color: muted, fontSize: 12),
         ),
         const SizedBox(height: 22),
         FilledButton.icon(

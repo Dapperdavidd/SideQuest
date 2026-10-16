@@ -40,6 +40,80 @@ paths:
           description: Public profile
         "404":
           description: Profile not found
+  /users/{userId}/follow-state:
+    get:
+      summary: Check whether the authenticated user follows another user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current follow state
+  /users/{userId}/follow:
+    post:
+      summary: Follow a user idempotently
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User is followed
+        "404":
+          description: User not found
+        "409":
+          description: Users cannot follow themselves
+    delete:
+      summary: Stop following a user idempotently
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User is not followed
+  /users/{userId}/followers:
+    get:
+      summary: List a user's followers
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Public follower profiles, newest first
+  /users/{userId}/following:
+    get:
+      summary: List profiles a user follows
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Public followed profiles, newest first
   /users/me/quests:
     get:
       summary: List quests created or joined by the authenticated user

@@ -2,8 +2,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, Award, Compass, LogOut, MapPin, Sparkles, Trophy, WalletCards } from "lucide-react";
+import { ArrowLeft, Award, Compass, LogOut, Sparkles, Trophy, WalletCards } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { getPublicProfile } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { signOut } from "./actions";
 import { PayoutDestinationForm } from "./payout-destination-form";
@@ -19,6 +20,7 @@ export default function ProfilePage() {
 async function ProfileContent() {
   const viewer = await getViewer();
   if (!viewer) redirect("/auth");
+  const stats = await getPublicProfile(viewer.username).catch(() => null);
 
   const firstName = viewer.displayName.split(/\s+/)[0] || "Explorer";
   const initial = firstName.charAt(0).toUpperCase();
@@ -46,13 +48,12 @@ async function ProfileContent() {
               <h1 className="mt-2 font-display text-4xl font-bold tracking-[-0.04em]">{viewer.displayName}</h1>
               <p className="mt-1 text-sm text-white/45">@{viewer.username}</p>
               <p className="mt-4 max-w-xl text-sm leading-6 text-white/60">{viewer.bio ?? `${firstName} is turning everyday moments into small adventures.`}</p>
-              <p className="mt-3 flex items-center gap-2 text-xs text-white/40"><MapPin size={14} />Lagos, Nigeria</p>
             </div>
           </div>
         </section>
 
         <section className="grid gap-4 px-5 py-8 sm:grid-cols-3 sm:px-10">
-          {[{ icon: Trophy, value: "0", label: "Completed" }, { icon: Compass, value: "0", label: "Active" }, { icon: Award, value: "1", label: "Achievement" }].map(({ icon: Icon, value, label }) => (
+          {[{ icon: Trophy, value: stats?.completed_quests_count ?? 0, label: "Completed" }, { icon: Compass, value: stats?.created_quests_count ?? 0, label: "Created" }, { icon: Award, value: stats?.wins_count ?? 0, label: "Wins" }].map(({ icon: Icon, value, label }) => (
             <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"><Icon size={19} className="text-accent" /><strong className="mt-5 block text-3xl">{value}</strong><span className="mt-1 block text-sm text-white/45">{label}</span></div>
           ))}
         </section>

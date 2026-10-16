@@ -48,7 +48,7 @@ async function QuestExperience({ params }: QuestPageProps) {
             <div className="flex min-h-[272px] max-w-2xl flex-col justify-end sm:min-h-[348px]">
               <span className="w-fit rounded-full bg-[#9167ff] px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider">{quest.quest_type}</span>
               <h1 className="mt-4 font-display text-4xl font-bold tracking-tight sm:text-5xl">{quest.title}</h1>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-white/75 sm:text-base">by {quest.creator_display_name} · @{quest.creator_username}</p>
+              <p className="mt-4 max-w-xl text-sm leading-6 text-white/75 sm:text-base">by <Link href={`/users/${quest.creator_username}`} className="font-bold underline decoration-accent decoration-2 underline-offset-4">{quest.creator_display_name} · @{quest.creator_username}</Link></p>
             </div>
           </div>
 

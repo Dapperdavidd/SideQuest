@@ -110,6 +110,20 @@ export type QuestSettlement = {
   }>;
 };
 
+export type PublicProfile = {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  followers_count: number;
+  following_count: number;
+  created_quests_count: number;
+  completed_quests_count: number;
+  wins_count: number;
+};
+
 export function apiUrl(path: string) {
   const base = process.env.NEXT_PUBLIC_API_URL;
   if (!base) throw new Error("NEXT_PUBLIC_API_URL is not configured.");
@@ -169,6 +183,23 @@ export async function getQuestSaved(questId: string, accessToken: string): Promi
   if (!response.ok) return false;
   const state = await response.json() as { saved: boolean };
   return state.saved;
+}
+
+export async function getPublicProfile(username: string): Promise<PublicProfile | null> {
+  const response = await fetch(apiUrl(`/users/${encodeURIComponent(username)}`), { cache: "no-store" });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("Unable to load this profile right now.");
+  return response.json() as Promise<PublicProfile>;
+}
+
+export async function getFollowState(userId: string, accessToken: string): Promise<boolean> {
+  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/follow-state`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) return false;
+  const state = await response.json() as { following: boolean };
+  return state.following;
 }
 
 export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]> {
