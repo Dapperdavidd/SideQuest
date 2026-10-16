@@ -46,6 +46,14 @@ export type CreatorEntry = {
   evidence: { proof_type: string; value: string }[];
 };
 
+export type PublicWinner = {
+  winner_position: number;
+  participant_username: string;
+  participant_display_name: string;
+  participant_avatar_url: string | null;
+  entry_id: string;
+};
+
 export type MyQuestSummary = {
   id: string;
   title: string;
@@ -121,6 +129,14 @@ export async function getQuest(id: string): Promise<Quest | null> {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Unable to load this quest right now.");
   return response.json() as Promise<Quest>;
+}
+
+export async function getQuestWinners(id: string): Promise<PublicWinner[]> {
+  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(id)}/winners`), {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load quest winners right now.");
+  return response.json() as Promise<PublicWinner[]>;
 }
 
 export async function getMyQuests(accessToken: string): Promise<MyQuestSummary[]> {

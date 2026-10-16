@@ -391,6 +391,20 @@ paths:
           description: The authenticated user is not the quest creator
         "404":
           description: Quest not found
+  /quests/{questId}/winners:
+    get:
+      summary: List published winners for a finalized public quest
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Ordered public winners, or an empty list before finalization
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublicWinner"
   /quests/validate:
     post:
       summary: Validate immutable quest participation rules
@@ -558,6 +572,27 @@ components:
         created_at:
           type: string
           format: date-time
+    PublicWinner:
+      type: object
+      required:
+        - winner_position
+        - participant_username
+        - participant_display_name
+        - entry_id
+      properties:
+        winner_position:
+          type: integer
+          minimum: 1
+          maximum: 3
+        participant_username:
+          type: string
+        participant_display_name:
+          type: string
+        participant_avatar_url:
+          type: [string, "null"]
+        entry_id:
+          type: string
+          format: uuid
     FundingIntent:
       type: object
       required:

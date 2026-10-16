@@ -68,6 +68,7 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(reviews::list_entries_for_creator)
             .service(reviews::review_entry)
             .service(reviews::get_quest_settlement)
+            .service(reviews::list_public_winners)
             .service(reviews::finalize_quest),
     );
 }

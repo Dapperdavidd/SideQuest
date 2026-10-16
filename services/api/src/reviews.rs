@@ -97,6 +97,15 @@ pub struct CreatorEntry {
 }
 
 #[derive(Debug, Serialize, FromRow)]
+pub struct PublicWinner {
+    winner_position: i16,
+    participant_username: String,
+    participant_display_name: String,
+    participant_avatar_url: Option<String>,
+    entry_id: Uuid,
+}
+
+#[derive(Debug, Serialize, FromRow)]
 pub struct EntryEvidence {
     proof_type: String,
     value: String,
@@ -454,6 +463,35 @@ pub async fn get_quest_settlement(
         total_allocated_nim: format_luna(total_allocated_luna),
         payouts,
     }))
+}
+
+#[get("/quests/{quest_id}/winners")]
+pub async fn list_public_winners(
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<web::Json<Vec<PublicWinner>>, ReviewError> {
+    let winners = sqlx::query_as::<_, PublicWinner>(
+        r#"
+        select qw.winner_position,
+               u.username as participant_username,
+               u.display_name as participant_display_name,
+               u.avatar_url as participant_avatar_url,
+               e.id as entry_id
+        from public.quest_winners qw
+        join public.quests q on q.id = qw.quest_id
+        join public.quest_entries e on e.id = qw.entry_id
+        join public.users u on u.id = e.participant_id
+        where qw.quest_id = $1
+          and q.status = 'FINALIZED'
+          and q.visibility = 'PUBLIC'
+        order by qw.winner_position
+        "#,
+    )
+    .bind(quest_id.into_inner())
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| ReviewError::Database)?;
+    Ok(web::Json(winners))
 }
 
 #[post("/quests/{quest_id}/finalize")]

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, CalendarDays, CheckCircle2, Trophy, UsersRound } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { formatDeadline, formatReward, getQuest, questImageClass } from "@/lib/api/quests";
+import { formatDeadline, formatReward, getQuest, getQuestWinners, questImageClass } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { JoinButton } from "./join-button";
 
@@ -23,7 +23,8 @@ async function QuestExperience({ params }: QuestPageProps) {
   const { id } = await params;
   const questPromise = getQuest(id);
   const viewerPromise = getViewer();
-  const [quest, viewer] = await Promise.all([questPromise, viewerPromise]);
+  const winnersPromise = getQuestWinners(id);
+  const [quest, viewer, winners] = await Promise.all([questPromise, viewerPromise, winnersPromise]);
   if (!quest) notFound();
 
   const remainingEntries = Math.max(0, quest.max_entries - quest.entries_received);
@@ -46,6 +47,8 @@ async function QuestExperience({ params }: QuestPageProps) {
             </div>
           </div>
 
+          {quest.status === "FINALIZED" ? <section className="mt-6 rounded-[1.5rem] border border-dark bg-dark p-6 text-white sm:p-8"><p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">Final results</p><h2 className="mt-2 font-display text-2xl font-bold">Quest winners</h2>{winners.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{winners.map((winner) => <div key={winner.entry_id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-4"><span className="grid h-11 w-11 place-items-center rounded-full bg-accent font-display text-lg font-bold text-dark">{winner.winner_position}</span><div><strong className="block">{winner.participant_display_name}</strong><span className="text-sm text-white/45">@{winner.participant_username}</span></div></div>)}</div> : <p className="mt-4 text-sm text-white/55">No valid winner was available when this quest was finalized.</p>}</section> : null}
+
           <section className="mt-6 rounded-[1.5rem] border border-line bg-white p-6 sm:p-8">
             <h2 className="font-display text-2xl font-bold">About this quest</h2>
             <p className="mt-4 whitespace-pre-wrap leading-7 text-muted">{quest.description}</p>
@@ -62,7 +65,7 @@ async function QuestExperience({ params }: QuestPageProps) {
             <div className="flex items-center justify-between"><span className="rounded-full bg-accent-soft px-3 py-1 text-xs font-bold uppercase">{quest.status.replaceAll("_", " ")}</span><span className="text-sm font-bold">{formatReward(quest)}</span></div>
             <dl className="mt-6 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-background p-3"><dt className="font-display text-xl font-bold">{remainingEntries}</dt><dd className="mt-1 text-[0.65rem] text-muted">slots left</dd></div><div className="rounded-xl bg-background p-3"><dt className="font-display text-xl font-bold">{quest.winner_count}</dt><dd className="mt-1 text-[0.65rem] text-muted">winner{quest.winner_count === 1 ? "" : "s"}</dd></div><div className="rounded-xl bg-background p-3"><dt className="font-display text-xl font-bold">{quest.participants_joined}</dt><dd className="mt-1 text-[0.65rem] text-muted">joined</dd></div></dl>
             <div className="mt-6 space-y-4 border-y border-line py-5 text-sm"><div className="flex items-center gap-3"><CalendarDays size={18} className="text-muted" /><span><strong>{formatDeadline(quest.deadline)}</strong><span className="block text-xs text-muted">{new Date(quest.deadline).toLocaleString()}</span></span></div><div className="flex items-center gap-3"><UsersRound size={18} className="text-muted" /><span>{quest.is_group_challenge ? `Groups of ${quest.required_group_size}` : "Individual entries"}</span></div><div className="flex items-center gap-3"><Trophy size={18} className="text-muted" /><span>{quest.winner_selection_method === "FIRST_VALID" ? "Earliest valid entries win" : "Best valid submissions win"}</span></div></div>
-            <div className="mt-6">{viewer?.id === quest.creator_id ? <Link href={`/quests/${quest.id}/review`} className="block w-full rounded-xl bg-accent px-6 py-4 text-center font-bold text-dark">Review submissions</Link> : <JoinButton questId={quest.id} isCreator={false} isOpen={isOpen} />}</div>
+            <div className="mt-6">{viewer?.id === quest.creator_id ? <Link href={quest.status === "FINALIZED" && quest.reward_enabled ? `/quests/${quest.id}/settlement` : `/quests/${quest.id}/review`} className="block w-full rounded-xl bg-accent px-6 py-4 text-center font-bold text-dark">{quest.status === "FINALIZED" && quest.reward_enabled ? "Track payouts" : "Review submissions"}</Link> : <JoinButton questId={quest.id} isCreator={false} isOpen={isOpen} />}</div>
           </div>
         </aside>
       </div>

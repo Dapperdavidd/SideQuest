@@ -243,6 +243,13 @@ class QuestRepository {
     return Quest.fromJson(response.data!);
   }
 
+  Future<List<PublicWinner>> listQuestWinners(String id) async {
+    final response = await _dio.get<List<dynamic>>('/quests/$id/winners');
+    return response.data!
+        .map((json) => PublicWinner.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
   Future<void> joinQuest(String id, String accessToken) async {
     await _dio.post<void>(
       '/quests/$id/join',
@@ -518,6 +525,27 @@ class CreatorPayout {
   final String? failureReason;
 }
 
+class PublicWinner {
+  const PublicWinner({
+    required this.position,
+    required this.username,
+    required this.displayName,
+    required this.entryId,
+  });
+
+  factory PublicWinner.fromJson(Map<String, dynamic> json) => PublicWinner(
+    position: (json['winner_position'] as num).toInt(),
+    username: json['participant_username'] as String,
+    displayName: json['participant_display_name'] as String,
+    entryId: json['entry_id'] as String,
+  );
+
+  final int position;
+  final String username;
+  final String displayName;
+  final String entryId;
+}
+
 class UserProfile {
   const UserProfile({
     required this.id,
@@ -647,6 +675,10 @@ final questsProvider = FutureProvider.autoDispose<List<Quest>>(
 final questProvider = FutureProvider.autoDispose.family<Quest, String>(
   (ref, id) => ref.watch(questRepositoryProvider).getQuest(id),
 );
+final questWinnersProvider = FutureProvider.autoDispose
+    .family<List<PublicWinner>, String>(
+      (ref, id) => ref.watch(questRepositoryProvider).listQuestWinners(id),
+    );
 final myQuestsProvider = FutureProvider.autoDispose<List<MyQuest>>((ref) {
   final session = currentSession;
   if (session == null) return const [];
@@ -1542,13 +1574,16 @@ class QuestDetailScreen extends ConsumerWidget {
   }
 }
 
-class _QuestDetail extends StatelessWidget {
+class _QuestDetail extends ConsumerWidget {
   const _QuestDetail({required this.quest});
   final Quest quest;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final remaining = math.max(0, quest.maxEntries - quest.entriesReceived);
+    final winners = quest.status == 'FINALIZED'
+        ? ref.watch(questWinnersProvider(quest.id))
+        : const AsyncValue<List<PublicWinner>>.data([]);
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -1646,6 +1681,113 @@ class _QuestDetail extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (quest.status == 'FINALIZED') ...[
+                  const SizedBox(height: 26),
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: ink,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'FINAL RESULTS',
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Quest winners',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        winners.when(
+                          loading: () => const LinearProgressIndicator(
+                            color: accent,
+                            backgroundColor: Colors.white12,
+                          ),
+                          error: (_, _) => TextButton(
+                            onPressed: () =>
+                                ref.invalidate(questWinnersProvider(quest.id)),
+                            child: const Text('Retry winner results'),
+                          ),
+                          data: (items) => items.isEmpty
+                              ? const Text(
+                                  'No valid winner was available when this quest was finalized.',
+                                  style: TextStyle(
+                                    color: Colors.white60,
+                                    height: 1.4,
+                                  ),
+                                )
+                              : Column(
+                                  children: items
+                                      .map(
+                                        (winner) => Container(
+                                          margin: const EdgeInsets.only(
+                                            bottom: 8,
+                                          ),
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white10,
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              CircleAvatar(
+                                                backgroundColor: accent,
+                                                foregroundColor: ink,
+                                                child: Text(
+                                                  '${winner.position}',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    winner.displayName,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    '@${winner.username}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white54,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                      .toList(growable: false),
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 26),
                 const Text(
                   'Required proof',
@@ -1674,10 +1816,12 @@ class _QuestDetail extends StatelessWidget {
           ),
         ],
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-        child: JoinQuestButton(questId: quest.id),
-      ),
+      bottomNavigationBar: quest.status == 'OPEN'
+          ? SafeArea(
+              minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+              child: JoinQuestButton(questId: quest.id),
+            )
+          : null,
     );
   }
 }
