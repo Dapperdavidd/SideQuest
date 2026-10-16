@@ -8,6 +8,7 @@ void main() {
       id: '00000000-0000-0000-0000-000000000001',
       title: 'Live Lagos photo walk',
       creator: 'SideQuest Test',
+      creatorUsername: 'sidequest_test',
       description: 'Photograph a landmark in the evening light.',
       questType: 'EXPLORE',
       status: 'OPEN',

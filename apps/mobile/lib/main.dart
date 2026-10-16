@@ -98,6 +98,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ProfileScreen(),
       ),
       GoRoute(
+        path: '/users/:username',
+        builder: (context, state) =>
+            PublicProfileScreen(username: state.pathParameters['username']!),
+      ),
+      GoRoute(
         path: '/wallet',
         builder: (context, state) => const WalletScreen(),
       ),
@@ -145,6 +150,7 @@ class Quest {
     required this.id,
     required this.title,
     required this.creator,
+    required this.creatorUsername,
     required this.description,
     required this.questType,
     required this.status,
@@ -165,6 +171,7 @@ class Quest {
     id: json['id'] as String,
     title: json['title'] as String,
     creator: json['creator_display_name'] as String,
+    creatorUsername: json['creator_username'] as String,
     description: json['description'] as String,
     questType: json['quest_type'] as String,
     status: json['status'] as String,
@@ -186,6 +193,7 @@ class Quest {
   final String id;
   final String title;
   final String creator;
+  final String creatorUsername;
   final String description;
   final String questType;
   final String status;
@@ -392,6 +400,33 @@ class QuestRepository {
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
     return UserProfile.fromJson(response.data!);
+  }
+
+  Future<UserProfile> getPublicProfile(String username) async {
+    final response = await _dio.get<Map<String, dynamic>>('/users/$username');
+    return UserProfile.fromJson(response.data!);
+  }
+
+  Future<bool> getFollowState(String userId, String accessToken) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/users/$userId/follow-state',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!['following'] as bool;
+  }
+
+  Future<void> followUser(String userId, String accessToken) async {
+    await _dio.post<void>(
+      '/users/$userId/follow',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
+  Future<void> unfollowUser(String userId, String accessToken) async {
+    await _dio.delete<void>(
+      '/users/$userId/follow',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
   }
 
   Future<UserProfile> updateMyProfile(
@@ -776,6 +811,20 @@ final myProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) {
   if (session == null) throw StateError('Authentication required');
   return ref.watch(questRepositoryProvider).getMyProfile(session.accessToken);
 });
+final publicProfileProvider = FutureProvider.autoDispose
+    .family<UserProfile, String>(
+      (ref, username) =>
+          ref.watch(questRepositoryProvider).getPublicProfile(username),
+    );
+final userFollowStateProvider = FutureProvider.autoDispose.family<bool, String>(
+  (ref, userId) {
+    final session = currentSession;
+    if (session == null || session.user.id == userId) return false;
+    return ref
+        .watch(questRepositoryProvider)
+        .getFollowState(userId, session.accessToken);
+  },
+);
 final payoutDestinationProvider =
     FutureProvider.autoDispose<PayoutDestination?>((ref) {
       final session = currentSession;
@@ -1736,9 +1785,20 @@ class _QuestDetail extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  'by ${quest.creator}',
-                  style: const TextStyle(color: muted, fontSize: 13),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () =>
+                        context.push('/users/${quest.creatorUsername}'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: muted,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 32),
+                    ),
+                    child: Text(
+                      'by ${quest.creator} · @${quest.creatorUsername}',
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -5175,6 +5235,217 @@ class _PayoutStatus extends StatelessWidget {
       style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
     ),
   );
+}
+
+class PublicProfileScreen extends ConsumerStatefulWidget {
+  const PublicProfileScreen({required this.username, super.key});
+
+  final String username;
+
+  @override
+  ConsumerState<PublicProfileScreen> createState() =>
+      _PublicProfileScreenState();
+}
+
+class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
+  bool working = false;
+
+  Future<void> toggleFollow(UserProfile profile, bool following) async {
+    final session = currentSession;
+    if (session == null) {
+      context.push('/auth?next=/users/${widget.username}');
+      return;
+    }
+    setState(() => working = true);
+    try {
+      final repository = ref.read(questRepositoryProvider);
+      if (following) {
+        await repository.unfollowUser(profile.id, session.accessToken);
+      } else {
+        await repository.followUser(profile.id, session.accessToken);
+      }
+      ref.invalidate(userFollowStateProvider(profile.id));
+      ref.invalidate(publicProfileProvider(widget.username));
+    } on DioException catch (error) {
+      if (!mounted) return;
+      final data = error.response?.data;
+      final message = data is Map<String, dynamic>
+          ? data['message'] as String? ?? 'Unable to update this follow.'
+          : 'Unable to update this follow.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('@${widget.username}'),
+        backgroundColor: background,
+      ),
+      body: SafeArea(
+        child: ref
+            .watch(publicProfileProvider(widget.username))
+            .when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator(color: ink)),
+              error: (_, _) => Center(
+                child: _QuestFeedError(
+                  onRetry: () =>
+                      ref.invalidate(publicProfileProvider(widget.username)),
+                ),
+              ),
+              data: (profile) {
+                final ownProfile = currentSession?.user.id == profile.id;
+                final following = ownProfile
+                    ? false
+                    : ref
+                              .watch(userFollowStateProvider(profile.id))
+                              .asData
+                              ?.value ??
+                          false;
+                return RefreshIndicator(
+                  color: ink,
+                  onRefresh: () async {
+                    ref.invalidate(publicProfileProvider(widget.username));
+                    ref.invalidate(userFollowStateProvider(profile.id));
+                    await ref.read(
+                      publicProfileProvider(widget.username).future,
+                    );
+                  },
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 48),
+                    children: [
+                      Center(
+                        child: profile.avatarUrl == null
+                            ? CircleAvatar(
+                                radius: 52,
+                                backgroundColor: ink,
+                                foregroundColor: accent,
+                                child: Text(
+                                  profile.displayName.characters.first
+                                      .toUpperCase(),
+                                  style: const TextStyle(
+                                    fontSize: 34,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              )
+                            : CircleAvatar(
+                                radius: 52,
+                                backgroundImage: NetworkImage(
+                                  profile.avatarUrl!,
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        profile.displayName,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -.8,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '@${profile.username}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: muted),
+                      ),
+                      if (profile.bio?.isNotEmpty ?? false) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          profile.bio!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(height: 1.5),
+                        ),
+                      ],
+                      const SizedBox(height: 22),
+                      if (ownProfile)
+                        FilledButton(
+                          onPressed: () => context.push('/profile'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accent,
+                            foregroundColor: ink,
+                          ),
+                          child: const Text('Manage profile'),
+                        )
+                      else
+                        FilledButton.icon(
+                          onPressed: working
+                              ? null
+                              : () => toggleFollow(profile, following),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: following ? Colors.white : accent,
+                            foregroundColor: ink,
+                            side: following
+                                ? const BorderSide(color: line)
+                                : BorderSide.none,
+                          ),
+                          icon: working
+                              ? const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  following
+                                      ? Icons.check_rounded
+                                      : Icons.person_add_alt_1_rounded,
+                                ),
+                          label: Text(following ? 'Following' : 'Follow'),
+                        ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          _ProfileStat(
+                            value: '${profile.followersCount}',
+                            label: 'Followers',
+                          ),
+                          const SizedBox(width: 8),
+                          _ProfileStat(
+                            value: '${profile.followingCount}',
+                            label: 'Following',
+                          ),
+                          const SizedBox(width: 8),
+                          _ProfileStat(
+                            value: '${profile.winsCount}',
+                            label: 'Wins',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          _ProfileStat(
+                            value: '${profile.createdQuestsCount}',
+                            label: 'Created',
+                          ),
+                          const SizedBox(width: 8),
+                          _ProfileStat(
+                            value: '${profile.completedQuestsCount}',
+                            label: 'Completed',
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(child: SizedBox()),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+      ),
+    );
+  }
 }
 
 class ProfileScreen extends ConsumerStatefulWidget {
