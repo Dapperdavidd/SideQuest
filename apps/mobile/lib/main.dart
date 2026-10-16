@@ -93,6 +93,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ProfileScreen(),
       ),
       GoRoute(
+        path: '/wallet',
+        builder: (context, state) => const WalletScreen(),
+      ),
+      GoRoute(
         path: '/my-quests',
         builder: (context, state) => const MyQuestsScreen(),
       ),
@@ -368,6 +372,16 @@ class QuestRepository {
     );
     return PayoutDestination.fromJson(response.data!);
   }
+
+  Future<List<PayoutSummary>> listMyPayouts(String accessToken) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/users/me/payouts',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!
+        .map((json) => PayoutSummary.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
 }
 
 class PayoutDestination {
@@ -381,6 +395,48 @@ class PayoutDestination {
 
   final String network;
   final String address;
+}
+
+class PayoutSummary {
+  const PayoutSummary({
+    required this.id,
+    required this.questId,
+    required this.questTitle,
+    required this.amountLuna,
+    required this.amountNim,
+    required this.status,
+    required this.network,
+    required this.destinationAddress,
+    required this.transactionHash,
+    required this.failureReason,
+    required this.createdAt,
+  });
+
+  factory PayoutSummary.fromJson(Map<String, dynamic> json) => PayoutSummary(
+    id: json['id'] as String,
+    questId: json['quest_id'] as String,
+    questTitle: json['quest_title'] as String,
+    amountLuna: (json['amount_luna'] as num).toInt(),
+    amountNim: json['amount_nim'] as String,
+    status: json['status'] as String,
+    network: json['network'] as String,
+    destinationAddress: json['destination_address'] as String,
+    transactionHash: json['transaction_hash'] as String?,
+    failureReason: json['failure_reason'] as String?,
+    createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+  );
+
+  final String id;
+  final String questId;
+  final String questTitle;
+  final int amountLuna;
+  final String amountNim;
+  final String status;
+  final String network;
+  final String destinationAddress;
+  final String? transactionHash;
+  final String? failureReason;
+  final DateTime createdAt;
 }
 
 class UserProfile {
@@ -538,6 +594,13 @@ final payoutDestinationProvider =
           .watch(questRepositoryProvider)
           .getPayoutDestination(session.accessToken);
     });
+final myPayoutsProvider = FutureProvider.autoDispose<List<PayoutSummary>>((
+  ref,
+) {
+  final session = currentSession;
+  if (session == null) return const [];
+  return ref.watch(questRepositoryProvider).listMyPayouts(session.accessToken);
+});
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -4082,6 +4145,311 @@ String _shortDate(DateTime value) {
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
 }
 
+class WalletScreen extends ConsumerWidget {
+  const WalletScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.go('/auth?next=/wallet');
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+
+    final payouts = ref.watch(myPayoutsProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Reward wallet'),
+        backgroundColor: background,
+        actions: [
+          IconButton(
+            tooltip: 'Payout settings',
+            onPressed: () => context.push('/profile'),
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: payouts.when(
+          loading: () =>
+              const Center(child: CircularProgressIndicator(color: ink)),
+          error: (_, _) => Center(
+            child: _QuestFeedError(
+              onRetry: () => ref.invalidate(myPayoutsProvider),
+            ),
+          ),
+          data: (items) {
+            final confirmedLuna = items
+                .where((payout) => payout.status == 'CONFIRMED')
+                .fold<int>(0, (total, payout) => total + payout.amountLuna);
+            return RefreshIndicator(
+              color: ink,
+              onRefresh: () => ref.refresh(myPayoutsProvider.future),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+                children: [
+                  const Text(
+                    'NIMIQ TESTNET',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: ink,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Confirmed rewards',
+                              style: TextStyle(color: Colors.white60),
+                            ),
+                            CircleAvatar(
+                              backgroundColor: accent,
+                              foregroundColor: ink,
+                              child: Icon(
+                                Icons.account_balance_wallet_outlined,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 22),
+                        Text(
+                          '${_formatLuna(confirmedLuna)} NIM',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 34,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Testnet NIM has no monetary value. Mainnet payouts are not enabled.',
+                          style: TextStyle(color: Colors.white38, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Payout activity',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        '${items.length} total',
+                        style: const TextStyle(color: muted, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (items.isEmpty)
+                    const _EmptyPayouts()
+                  else
+                    ...items.map(_PayoutCard.new),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  static String _formatLuna(int luna) {
+    final whole = luna ~/ 100000;
+    final fraction = (luna % 100000).toString().padLeft(5, '0');
+    final trimmed = fraction.replaceFirst(RegExp(r'0+$'), '');
+    return trimmed.isEmpty ? '$whole' : '$whole.$trimmed';
+  }
+}
+
+class _EmptyPayouts extends StatelessWidget {
+  const _EmptyPayouts();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 42),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      border: Border.all(color: line),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Column(
+      children: [
+        const CircleAvatar(
+          radius: 24,
+          backgroundColor: Color(0xFFF0F1EC),
+          foregroundColor: muted,
+          child: Icon(Icons.schedule_rounded),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'No payouts yet',
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 7),
+        const Text(
+          'When you win a funded quest, its reward and payout status will appear here.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: muted, height: 1.45),
+        ),
+        const SizedBox(height: 18),
+        FilledButton(
+          onPressed: () => context.go('/discover'),
+          style: FilledButton.styleFrom(
+            backgroundColor: accent,
+            foregroundColor: ink,
+          ),
+          child: const Text('Explore quests'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _PayoutCard extends StatelessWidget {
+  const _PayoutCard(this.payout);
+
+  final PayoutSummary payout;
+
+  @override
+  Widget build(BuildContext context) {
+    final confirmed = payout.status == 'CONFIRMED';
+    final address = payout.destinationAddress;
+    final shortAddress = address.length > 20
+        ? '${address.substring(0, 9)}…${address.substring(address.length - 9)}'
+        : address;
+    final date = payout.createdAt;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            backgroundColor: confirmed ? accent : const Color(0xFFF0F1EC),
+            foregroundColor: ink,
+            child: Icon(
+              confirmed
+                  ? Icons.check_circle_outline_rounded
+                  : Icons.schedule_rounded,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        payout.questTitle,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    Text(
+                      '+${payout.amountNim} NIM',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '${_month(date.month)} ${date.day}, ${date.year}',
+                  style: const TextStyle(color: muted, fontSize: 11),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _PayoutStatus(status: payout.status),
+                    Text(
+                      'To $shortAddress',
+                      style: const TextStyle(color: muted, fontSize: 11),
+                    ),
+                  ],
+                ),
+                if (payout.failureReason != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    payout.failureReason!,
+                    style: const TextStyle(
+                      color: Color(0xFF8F2E1E),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _month(int value) => const [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ][value - 1];
+}
+
+class _PayoutStatus extends StatelessWidget {
+  const _PayoutStatus({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: status == 'CONFIRMED' ? const Color(0xFFF1FFD0) : background,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      status.toLowerCase(),
+      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
+    ),
+  );
+}
+
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
@@ -4434,6 +4802,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           icon: const Icon(Icons.emoji_events_outlined),
           label: const Text('Manage my quests'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () => context.push('/wallet'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: ink,
+            minimumSize: const Size.fromHeight(52),
+          ),
+          icon: const Icon(Icons.account_balance_wallet_outlined),
+          label: const Text('View reward wallet'),
         ),
       ],
     );

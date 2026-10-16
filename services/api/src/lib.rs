@@ -60,6 +60,7 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(payments::create_funding_intent)
             .service(payments::get_payout_destination)
             .service(payments::set_payout_destination)
+            .service(payments::list_my_payouts)
             .service(payments::get_funding_intent)
             .service(payments::submit_funding_transaction)
             .service(payments::refresh_funding_transaction)

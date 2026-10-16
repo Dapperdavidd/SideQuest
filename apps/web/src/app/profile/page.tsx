@@ -66,6 +66,7 @@ async function ProfileContent() {
           <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-dark"><WalletCards size={19} /></span><div><h3 className="font-display font-bold">NIM reward destination</h3><p className="mt-1 text-sm leading-6 text-white/50">Required before entering a rewarded quest. The address is locked with each official submission.</p></div></div>
             <PayoutDestinationForm />
+            <Link href="/wallet" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline"><WalletCards size={16} />View reward payouts</Link>
           </div>
         </section>
       </div>

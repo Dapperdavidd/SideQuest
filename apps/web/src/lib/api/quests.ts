@@ -62,6 +62,22 @@ export type MyQuestSummary = {
   published_at: string | null;
 };
 
+export type PayoutSummary = {
+  id: string;
+  quest_id: string;
+  quest_title: string;
+  amount_luna: number;
+  amount_nim: string;
+  status: "PENDING" | "PROCESSING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "CANCELLED";
+  network: "testnet";
+  destination_address: string;
+  transaction_hash: string | null;
+  submitted_at: string | null;
+  confirmed_at: string | null;
+  failure_reason: string | null;
+  created_at: string;
+};
+
 export function apiUrl(path: string) {
   const base = process.env.NEXT_PUBLIC_API_URL;
   if (!base) throw new Error("NEXT_PUBLIC_API_URL is not configured.");
@@ -90,6 +106,15 @@ export async function getMyQuests(accessToken: string): Promise<MyQuestSummary[]
   });
   if (!response.ok) throw new Error("Unable to load your quests right now.");
   return response.json() as Promise<MyQuestSummary[]>;
+}
+
+export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]> {
+  const response = await fetch(apiUrl("/users/me/payouts"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load your payouts right now.");
+  return response.json() as Promise<PayoutSummary[]>;
 }
 
 export async function readApiError(response: Response, fallback: string) {

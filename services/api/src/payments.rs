@@ -208,6 +208,59 @@ pub struct PayoutDestination {
     updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PayoutSummary {
+    id: Uuid,
+    quest_id: Uuid,
+    quest_title: String,
+    amount_luna: i64,
+    amount_nim: String,
+    status: String,
+    network: String,
+    destination_address: String,
+    transaction_hash: Option<String>,
+    submitted_at: Option<DateTime<Utc>>,
+    confirmed_at: Option<DateTime<Utc>>,
+    failure_reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredPayoutSummary {
+    id: Uuid,
+    quest_id: Uuid,
+    quest_title: String,
+    amount_luna: i64,
+    status: String,
+    network: String,
+    destination_address: String,
+    transaction_hash: Option<String>,
+    submitted_at: Option<DateTime<Utc>>,
+    confirmed_at: Option<DateTime<Utc>>,
+    failure_reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+impl StoredPayoutSummary {
+    fn into_response(self) -> PayoutSummary {
+        PayoutSummary {
+            id: self.id,
+            quest_id: self.quest_id,
+            quest_title: self.quest_title,
+            amount_luna: self.amount_luna,
+            amount_nim: format_luna(self.amount_luna),
+            status: self.status,
+            network: self.network,
+            destination_address: self.destination_address,
+            transaction_hash: self.transaction_hash,
+            submitted_at: self.submitted_at,
+            confirmed_at: self.confirmed_at,
+            failure_reason: self.failure_reason,
+            created_at: self.created_at,
+        }
+    }
+}
+
 #[get("/users/me/payout-destination")]
 pub async fn get_payout_destination(
     request: HttpRequest,
@@ -254,6 +307,46 @@ pub async fn set_payout_destination(
     .await
     .map_err(|_| FundingError::Database)?;
     Ok(web::Json(destination))
+}
+
+#[get("/users/me/payouts")]
+pub async fn list_my_payouts(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<Vec<PayoutSummary>>, FundingError> {
+    let user = state.auth.authenticate(&request).await?;
+    let payouts = sqlx::query_as::<_, StoredPayoutSummary>(
+        r#"
+        select p.id,
+               q.id as quest_id,
+               q.title as quest_title,
+               p.amount_minor as amount_luna,
+               p.status::text as status,
+               p.network,
+               p.destination_address,
+               p.transaction_hash,
+               p.submitted_at,
+               p.confirmed_at,
+               p.failure_reason,
+               p.created_at
+        from public.payouts p
+        join public.reward_allocations ra on ra.id = p.reward_allocation_id
+        join public.quest_winners qw on qw.id = ra.winner_id
+        join public.quests q on q.id = qw.quest_id
+        where p.recipient_id = $1
+        order by p.created_at desc, p.id desc
+        "#,
+    )
+    .bind(user.id)
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| FundingError::Database)?;
+    Ok(web::Json(
+        payouts
+            .into_iter()
+            .map(StoredPayoutSummary::into_response)
+            .collect(),
+    ))
 }
 
 impl StoredFundingIntent {
