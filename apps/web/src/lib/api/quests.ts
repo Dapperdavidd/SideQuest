@@ -26,6 +26,18 @@ export type Quest = {
   participants_joined: number;
   created_at: string;
   published_at: string | null;
+  viewer_joined: boolean;
+};
+
+export type QuestInvitation = {
+  id: string;
+  quest_id: string;
+  token: string;
+  max_uses: number;
+  use_count: number;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
 };
 
 export type ApiErrorBody = {
@@ -140,8 +152,9 @@ export async function listQuests(filters: { search?: string; questType?: Quest["
   return response.json() as Promise<Quest[]>;
 }
 
-export async function getQuest(id: string): Promise<Quest | null> {
+export async function getQuest(id: string, accessToken?: string): Promise<Quest | null> {
   const response = await fetch(apiUrl(`/quests/${encodeURIComponent(id)}`), {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     cache: "no-store",
   });
   if (response.status === 404) return null;

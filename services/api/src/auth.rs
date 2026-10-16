@@ -99,6 +99,16 @@ impl AuthVerifier {
         Ok(AuthenticatedUser { id })
     }
 
+    pub async fn authenticate_optional(
+        &self,
+        request: &HttpRequest,
+    ) -> Result<Option<AuthenticatedUser>, AuthError> {
+        if request.headers().get("authorization").is_none() {
+            return Ok(None);
+        }
+        self.authenticate(request).await.map(Some)
+    }
+
     async fn find_key(&self, key_id: &str) -> Option<jsonwebtoken::jwk::Jwk> {
         self.keys.read().await.as_ref()?.find(key_id).cloned()
     }

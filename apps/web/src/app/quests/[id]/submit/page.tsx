@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { getQuest } from "@/lib/api/quests";
+import { createClient } from "@/lib/supabase/server";
 import { SubmissionForm } from "./submission-form";
 
 type SubmitPageProps = {
@@ -16,7 +17,9 @@ export default function SubmitPage(props: SubmitPageProps) {
 
 async function SubmitExperience({ params }: SubmitPageProps) {
   const { id } = await params;
-  const quest = await getQuest(id);
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const quest = await getQuest(id, session?.access_token);
   if (!quest) notFound();
 
   return (

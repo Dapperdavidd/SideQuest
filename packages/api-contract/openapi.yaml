@@ -237,7 +237,10 @@ paths:
           description: Quest fields violate product rules
   /quests/{questId}:
     get:
-      summary: Get a public quest
+      summary: Get a public quest, or an accessible private quest when authenticated
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/QuestId"
       responses:
@@ -248,7 +251,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Quest"
         "404":
-          description: Quest is missing or not public
+          description: Quest is missing or inaccessible to the caller
   /quests/{questId}/saved:
     get:
       summary: Check whether the authenticated user saved a quest
@@ -307,6 +310,95 @@ paths:
           description: Membership created
         "409":
           description: Quest is closed, already joined, or owned by the user
+        "404":
+          description: Private quest access has not been granted by an invitation
+  /quests/{questId}/invitations:
+    get:
+      summary: List invitation links created for a private quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Creator-owned invitations, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QuestInvitation"
+        "403":
+          description: The authenticated user is not the creator
+    post:
+      summary: Create a capacity-limited, expiring invitation for a private quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max_uses]
+              properties:
+                max_uses:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                expires_at:
+                  type: [string, "null"]
+                  format: date-time
+      responses:
+        "201":
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestInvitation"
+        "403":
+          description: Caller is not the creator or the quest is public
+        "409":
+          description: Quest is not open
+  /quests/{questId}/invitations/{invitationId}:
+    delete:
+      summary: Revoke a creator-owned invitation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+        - in: path
+          name: invitationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Invitation revoked
+        "404":
+          description: Invitation not found for this creator and quest
+  /invitations/{token}/accept:
+    post:
+      summary: Accept a valid private-quest invitation and create membership
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Invitation accepted, or membership already existed
+        "404":
+          description: Invitation token not found
+        "409":
+          description: Invitation expired, revoked, exhausted, or quest is no longer open
   /quests/{questId}/close:
     post:
       summary: Close an open quest to new submissions and begin creator review
@@ -939,12 +1031,43 @@ components:
               type: integer
             participants_joined:
               type: integer
+            viewer_joined:
+              type: boolean
             created_at:
               type: string
               format: date-time
             published_at:
               type: [string, "null"]
               format: date-time
+    QuestInvitation:
+      type: object
+      required: [id, quest_id, token, max_uses, use_count, expires_at, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quest_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          format: uuid
+        max_uses:
+          type: integer
+          minimum: 1
+          maximum: 10
+        use_count:
+          type: integer
+          minimum: 0
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
     SubmitEntry:
       type: object
       required: [evidence]

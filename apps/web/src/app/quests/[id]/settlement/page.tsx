@@ -16,11 +16,11 @@ export default function SettlementPage(props: SettlementPageProps) {
 
 async function SettlementExperience({ params }: SettlementPageProps) {
   const { id } = await params;
-  const [quest, viewer] = await Promise.all([getQuest(id), getViewer()]);
-  if (!viewer) redirect(`/auth?next=${encodeURIComponent(`/quests/${id}/settlement`)}`);
-  if (!quest || quest.creator_id !== viewer.id) notFound();
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
+  const [quest, viewer] = await Promise.all([getQuest(id, session?.access_token), getViewer()]);
+  if (!viewer) redirect(`/auth?next=${encodeURIComponent(`/quests/${id}/settlement`)}`);
+  if (!quest || quest.creator_id !== viewer.id) notFound();
   if (!session) redirect(`/auth?next=${encodeURIComponent(`/quests/${id}/settlement`)}`);
   const settlement = await getQuestSettlement(id, session.access_token);
   const confirmed = settlement.payouts.filter((payout) => payout.status === "CONFIRMED").length;

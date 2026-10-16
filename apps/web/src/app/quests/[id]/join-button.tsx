@@ -11,12 +11,13 @@ type JoinButtonProps = {
   questId: string;
   isCreator: boolean;
   isOpen: boolean;
+  initialJoined?: boolean;
 };
 
-export function JoinButton({ questId, isCreator, isOpen }: JoinButtonProps) {
+export function JoinButton({ questId, isCreator, isOpen, initialJoined = false }: JoinButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [joined, setJoined] = useState(false);
+  const [joined, setJoined] = useState(initialJoined);
   const [error, setError] = useState<string | null>(null);
 
   async function join() {

@@ -11,6 +11,7 @@ import { FundingPanel } from "./funding-panel";
 
 type QuestType = "Friends" | "Bounty" | "Explore";
 type SelectionMethod = "First valid" | "Best submission";
+type Visibility = "PUBLIC" | "PRIVATE" | "INVITE_ONLY";
 
 const stepNames = ["Quest", "People", "Proof", "Winners", "Reward", "Review"];
 
@@ -22,6 +23,7 @@ export default function CreateQuestPage() {
   const [deadline, setDeadline] = useState("");
   const [deadlineValid, setDeadlineValid] = useState(false);
   const [questType, setQuestType] = useState<QuestType>("Friends");
+  const [visibility, setVisibility] = useState<Visibility>("PUBLIC");
   const [isGroup, setIsGroup] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
   const [maxEntries, setMaxEntries] = useState(5);
@@ -71,7 +73,7 @@ export default function CreateQuestPage() {
           description: description.trim(),
           cover_media_url: null,
           quest_type: questType.toUpperCase(),
-          visibility: "PUBLIC",
+          visibility,
           is_group_challenge: isGroup,
           required_group_size: isGroup ? groupSize : null,
           max_entries: maxEntries,
@@ -150,6 +152,7 @@ export default function CreateQuestPage() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 2 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Who can take part?</h1><p className="mt-2 text-sm text-muted">Joining shows interest. A slot is only used when an official entry is accepted.</p>
                 <div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => setIsGroup(false)} className={`rounded-xl border p-5 text-left ${!isGroup ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-bold">Individual</span><span className="mt-1 block text-sm text-muted">One person submits one entry.</span></button><button onClick={() => setIsGroup(true)} className={`rounded-xl border p-5 text-left ${isGroup ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="flex items-center gap-2 font-bold"><UsersRound size={18} /> Group challenge</span><span className="mt-1 block text-sm text-muted">One representative submits for the group.</span></button></div>
+                <fieldset className="mt-7"><legend className="text-sm font-bold">Quest access</legend><div className="mt-3 grid gap-3 sm:grid-cols-3">{(["PUBLIC", "PRIVATE", "INVITE_ONLY"] as Visibility[]).map((value) => <button key={value} onClick={() => setVisibility(value)} className={`rounded-xl border p-4 text-left ${visibility === value ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-bold">{value === "PUBLIC" ? "Public" : value === "PRIVATE" ? "Private" : "Invite only"}</span><span className="mt-1 block text-xs leading-5 text-muted">{value === "PUBLIC" ? "Anyone can discover and join" : "Only people with your invitation link"}</span></button>)}</div></fieldset>
                 {isGroup ? <label className="mt-5 block text-sm font-bold">Required people, including the submitter<input type="number" min={2} max={50} value={groupSize} onChange={(event) => setGroupSize(Math.max(2, Number(event.target.value)))} className="mt-2 w-full rounded-xl border border-line bg-background px-4 py-3 font-normal" /></label> : null}
                 <fieldset className="mt-7"><legend className="text-sm font-bold">Maximum accepted entries</legend><div className="mt-3 flex gap-3">{[3, 5, 10].map((count) => <button key={count} onClick={() => { setMaxEntries(count); setWinners((value) => Math.min(value, count)); }} className={`grid h-12 w-16 place-items-center rounded-xl border font-bold ${maxEntries === count ? "border-dark bg-dark text-white" : "border-line"}`}>{count}</button>)}</div><p className="mt-3 text-xs text-muted">SideQuest never accepts more than 10 official entries.</p></fieldset>
               </div>
@@ -168,7 +171,7 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 5 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
             ) : null}
 
             <div className="mt-9 flex items-center justify-between border-t border-line pt-5">

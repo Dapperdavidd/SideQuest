@@ -16,11 +16,11 @@ export default function ReviewPage(props: ReviewPageProps) {
 
 async function ReviewExperience({ params }: ReviewPageProps) {
   const { id } = await params;
-  const [quest, viewer] = await Promise.all([getQuest(id), getViewer()]);
-  if (!viewer) redirect(`/auth?next=${encodeURIComponent(`/quests/${id}/review`)}`);
-  if (!quest || quest.creator_id !== viewer.id) notFound();
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
+  const [quest, viewer] = await Promise.all([getQuest(id, session?.access_token), getViewer()]);
+  if (!viewer) redirect(`/auth?next=${encodeURIComponent(`/quests/${id}/review`)}`);
+  if (!quest || quest.creator_id !== viewer.id) notFound();
   if (!session) redirect(`/auth?next=${encodeURIComponent(`/quests/${id}/review`)}`);
   const entriesResponse = await fetch(apiUrl(`/quests/${id}/entries`), {
     headers: { Authorization: `Bearer ${session.access_token}` },

@@ -95,6 +95,7 @@ pub struct Quest {
     pub participants_joined: i64,
     pub created_at: DateTime<Utc>,
     pub published_at: Option<DateTime<Utc>>,
+    pub viewer_joined: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,7 +353,8 @@ pub async fn list_quests(
                (select count(*) from public.quest_entries e where e.quest_id = q.id) as entries_received,
                (select count(*) from public.quest_participants p where p.quest_id = q.id) as participants_joined,
                q.created_at,
-               q.published_at
+               q.published_at,
+               false as viewer_joined
         from public.quests q
         join public.users u on u.id = q.creator_id
         where q.visibility = 'PUBLIC'
@@ -381,10 +383,13 @@ pub async fn list_quests(
 
 #[get("/quests/{quest_id}")]
 pub async fn get_quest(
+    request: HttpRequest,
     state: web::Data<AppState>,
     quest_id: web::Path<Uuid>,
 ) -> Result<web::Json<Quest>, QuestError> {
-    let quest = find_public_quest(&state, quest_id.into_inner()).await?;
+    let viewer = state.auth.authenticate_optional(&request).await?;
+    let quest =
+        find_accessible_quest(&state, quest_id.into_inner(), viewer.map(|user| user.id)).await?;
     Ok(web::Json(quest))
 }
 
@@ -654,10 +659,15 @@ pub async fn join_quest(
 ) -> Result<(web::Json<JoinResult>, StatusCode), QuestError> {
     let user = state.auth.authenticate(&request).await?;
     let quest_id = quest_id.into_inner();
-    let quest = sqlx::query_as::<_, (Uuid, String, DateTime<Utc>)>(
-        "select creator_id, status::text, deadline from public.quests where id = $1",
+    let quest = sqlx::query_as::<_, (Uuid, String, DateTime<Utc>, String, bool)>(
+        r#"
+        select creator_id, status::text, deadline, visibility::text,
+               exists(select 1 from public.quest_participants where quest_id = $1 and user_id = $2)
+        from public.quests where id = $1
+        "#,
     )
     .bind(quest_id)
+    .bind(user.id)
     .fetch_optional(&state.database)
     .await
     .map_err(|_| QuestError::Database)?
@@ -668,6 +678,9 @@ pub async fn join_quest(
     }
     if quest.1 != "OPEN" || quest.2 <= Utc::now() {
         return Err(QuestError::NotOpen);
+    }
+    if quest.3 != "PUBLIC" && !quest.4 {
+        return Err(QuestError::NotFound);
     }
 
     let joined = sqlx::query_scalar::<_, Uuid>(
@@ -840,8 +853,12 @@ pub async fn validate_quest(rules: web::Json<QuestRules>) -> impl actix_web::Res
     }
 }
 
-async fn find_public_quest(state: &AppState, id: Uuid) -> Result<Quest, QuestError> {
-    find_quest(state, id, None, true).await
+async fn find_accessible_quest(
+    state: &AppState,
+    id: Uuid,
+    viewer_id: Option<Uuid>,
+) -> Result<Quest, QuestError> {
+    find_quest(state, id, None, true, viewer_id).await
 }
 
 async fn find_creator_quest(
@@ -849,7 +866,7 @@ async fn find_creator_quest(
     id: Uuid,
     creator_id: Uuid,
 ) -> Result<Quest, QuestError> {
-    find_quest(state, id, Some(creator_id), false).await
+    find_quest(state, id, Some(creator_id), false, Some(creator_id)).await
 }
 
 async fn find_quest(
@@ -857,6 +874,7 @@ async fn find_quest(
     id: Uuid,
     creator_id: Option<Uuid>,
     public_only: bool,
+    viewer_id: Option<Uuid>,
 ) -> Result<Quest, QuestError> {
     sqlx::query_as::<_, Quest>(
         r#"
@@ -886,7 +904,11 @@ async fn find_quest(
                (select count(*) from public.quest_entries e where e.quest_id = q.id) as entries_received,
                (select count(*) from public.quest_participants p where p.quest_id = q.id) as participants_joined,
                q.created_at,
-               q.published_at
+               q.published_at,
+               ($4::uuid is not null and exists(
+                 select 1 from public.quest_participants viewer_membership
+                 where viewer_membership.quest_id = q.id and viewer_membership.user_id = $4
+               )) as viewer_joined
         from public.quests q
         join public.users u on u.id = q.creator_id
         where q.id = $1
@@ -894,12 +916,20 @@ async fn find_quest(
           and (
             not $3
             or (q.visibility = 'PUBLIC' and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED'))
+            or ($4::uuid is not null and (
+              q.creator_id = $4
+              or exists(
+                select 1 from public.quest_participants access_membership
+                where access_membership.quest_id = q.id and access_membership.user_id = $4
+              )
+            ))
           )
         "#,
     )
     .bind(id)
     .bind(creator_id)
     .bind(public_only)
+    .bind(viewer_id)
     .fetch_optional(&state.database)
     .await
     .map_err(|_| QuestError::Database)?
