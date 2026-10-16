@@ -59,7 +59,7 @@ export type MyQuestSummary = {
   title: string;
   quest_type: "FRIENDS" | "BOUNTY" | "EXPLORE";
   status: string;
-  relationship: "CREATOR" | "PARTICIPANT";
+  relationship: "CREATOR" | "PARTICIPANT" | "SAVED";
   deadline: string;
   entries_received: number;
   max_entries: number;
@@ -150,6 +150,25 @@ export async function getMyQuests(accessToken: string): Promise<MyQuestSummary[]
   });
   if (!response.ok) throw new Error("Unable to load your quests right now.");
   return response.json() as Promise<MyQuestSummary[]>;
+}
+
+export async function getSavedQuests(accessToken: string): Promise<MyQuestSummary[]> {
+  const response = await fetch(apiUrl("/users/me/saved-quests"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load your saved quests right now.");
+  return response.json() as Promise<MyQuestSummary[]>;
+}
+
+export async function getQuestSaved(questId: string, accessToken: string): Promise<boolean> {
+  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(questId)}/saved`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) return false;
+  const state = await response.json() as { saved: boolean };
+  return state.saved;
 }
 
 export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]> {

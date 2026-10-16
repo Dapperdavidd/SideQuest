@@ -50,6 +50,16 @@ paths:
           description: Related quests ordered by latest creation or publishing activity
         "401":
           description: Missing, invalid, or expired access token
+  /users/me/saved-quests:
+    get:
+      summary: List public quests saved by the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Saved quests ordered by most recently saved
+        "401":
+          description: Missing, invalid, or expired access token
   /users/me/payout-destination:
     get:
       summary: Get the authenticated user's Nimiq testnet payout destination
@@ -165,6 +175,36 @@ paths:
                 $ref: "#/components/schemas/Quest"
         "404":
           description: Quest is missing or not public
+  /quests/{questId}/saved:
+    get:
+      summary: Check whether the authenticated user saved a quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Current saved state
+    put:
+      summary: Save a public quest idempotently
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Quest is saved
+        "404":
+          description: Quest is not publicly available
+    delete:
+      summary: Remove a quest from the authenticated user's saved list
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "204":
+          description: Saved state removed or already absent
   /quests/{questId}/publish:
     post:
       summary: Publish a free quest or move a reward quest to awaiting funding

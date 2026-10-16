@@ -1,4 +1,6 @@
-use actix_web::{HttpRequest, HttpResponse, ResponseError, get, http::StatusCode, post, web};
+use actix_web::{
+    HttpRequest, HttpResponse, ResponseError, delete, get, http::StatusCode, post, put, web,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -182,6 +184,12 @@ pub struct MyQuestSummary {
     reward_amount_minor: Option<i64>,
     reward_currency: Option<String>,
     published_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SavedQuestState {
+    quest_id: Uuid,
+    saved: bool,
 }
 
 #[derive(Debug, Error)]
@@ -416,6 +424,120 @@ pub async fn list_my_quests(
     .map_err(|_| QuestError::Database)?;
 
     Ok(web::Json(quests))
+}
+
+#[get("/users/me/saved-quests")]
+pub async fn list_saved_quests(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<Vec<MyQuestSummary>>, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quests = sqlx::query_as::<_, MyQuestSummary>(
+        r#"
+        select q.id,
+               q.title,
+               q.quest_type::text as quest_type,
+               q.status::text as status,
+               'SAVED'::text as relationship,
+               q.deadline,
+               (select count(*) from public.quest_entries e where e.quest_id = q.id) as entries_received,
+               q.max_entries,
+               (select count(*) from public.quest_participants p where p.quest_id = q.id) as participants_joined,
+               q.reward_enabled,
+               q.reward_amount_minor,
+               q.reward_currency::text as reward_currency,
+               q.published_at
+        from public.saved_quests saved
+        join public.quests q on q.id = saved.quest_id
+        where saved.user_id = $1
+          and q.visibility = 'PUBLIC'
+          and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
+        order by saved.created_at desc
+        "#,
+    )
+    .bind(user.id)
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?;
+
+    Ok(web::Json(quests))
+}
+
+#[get("/quests/{quest_id}/saved")]
+pub async fn get_saved_quest_state(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<web::Json<SavedQuestState>, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quest_id = quest_id.into_inner();
+    let saved = sqlx::query_scalar::<_, bool>(
+        "select exists(select 1 from public.saved_quests where user_id = $1 and quest_id = $2)",
+    )
+    .bind(user.id)
+    .bind(quest_id)
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?;
+
+    Ok(web::Json(SavedQuestState { quest_id, saved }))
+}
+
+#[put("/quests/{quest_id}/saved")]
+pub async fn save_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<web::Json<SavedQuestState>, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quest_id = quest_id.into_inner();
+    let visible = sqlx::query_scalar::<_, bool>(
+        r#"
+        select exists(
+          select 1 from public.quests
+          where id = $1
+            and visibility = 'PUBLIC'
+            and status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
+        )
+        "#,
+    )
+    .bind(quest_id)
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?;
+    if !visible {
+        return Err(QuestError::NotFound);
+    }
+
+    sqlx::query(
+        "insert into public.saved_quests (user_id, quest_id) values ($1, $2) on conflict do nothing",
+    )
+    .bind(user.id)
+    .bind(quest_id)
+    .execute(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?;
+
+    Ok(web::Json(SavedQuestState {
+        quest_id,
+        saved: true,
+    }))
+}
+
+#[delete("/quests/{quest_id}/saved")]
+pub async fn remove_saved_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<HttpResponse, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    sqlx::query("delete from public.saved_quests where user_id = $1 and quest_id = $2")
+        .bind(user.id)
+        .bind(quest_id.into_inner())
+        .execute(&state.database)
+        .await
+        .map_err(|_| QuestError::Database)?;
+    Ok(HttpResponse::NoContent().finish())
 }
 
 #[post("/quests")]

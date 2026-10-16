@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, CalendarDays, CheckCircle2, Trophy, UsersRound } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { formatDeadline, formatReward, getQuest, getQuestWinners, questImageClass } from "@/lib/api/quests";
+import { formatDeadline, formatReward, getQuest, getQuestSaved, getQuestWinners, questImageClass } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
+import { createClient } from "@/lib/supabase/server";
 import { JoinButton } from "./join-button";
+import { SaveQuestButton } from "./save-quest-button";
 
 type QuestPageProps = {
   params: Promise<{ id: string }>;
@@ -24,8 +26,11 @@ async function QuestExperience({ params }: QuestPageProps) {
   const questPromise = getQuest(id);
   const viewerPromise = getViewer();
   const winnersPromise = getQuestWinners(id);
-  const [quest, viewer, winners] = await Promise.all([questPromise, viewerPromise, winnersPromise]);
+  const supabase = await createClient();
+  const sessionPromise = supabase.auth.getSession();
+  const [quest, viewer, winners, { data: { session } }] = await Promise.all([questPromise, viewerPromise, winnersPromise, sessionPromise]);
   if (!quest) notFound();
+  const initiallySaved = session ? await getQuestSaved(id, session.access_token) : false;
 
   const remainingEntries = Math.max(0, quest.max_entries - quest.entries_received);
   const isOpen = quest.status === "OPEN";
@@ -66,6 +71,7 @@ async function QuestExperience({ params }: QuestPageProps) {
             <dl className="mt-6 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-background p-3"><dt className="font-display text-xl font-bold">{remainingEntries}</dt><dd className="mt-1 text-[0.65rem] text-muted">slots left</dd></div><div className="rounded-xl bg-background p-3"><dt className="font-display text-xl font-bold">{quest.winner_count}</dt><dd className="mt-1 text-[0.65rem] text-muted">winner{quest.winner_count === 1 ? "" : "s"}</dd></div><div className="rounded-xl bg-background p-3"><dt className="font-display text-xl font-bold">{quest.participants_joined}</dt><dd className="mt-1 text-[0.65rem] text-muted">joined</dd></div></dl>
             <div className="mt-6 space-y-4 border-y border-line py-5 text-sm"><div className="flex items-center gap-3"><CalendarDays size={18} className="text-muted" /><span><strong>{formatDeadline(quest.deadline)}</strong><span className="block text-xs text-muted">{new Date(quest.deadline).toLocaleString()}</span></span></div><div className="flex items-center gap-3"><UsersRound size={18} className="text-muted" /><span>{quest.is_group_challenge ? `Groups of ${quest.required_group_size}` : "Individual entries"}</span></div><div className="flex items-center gap-3"><Trophy size={18} className="text-muted" /><span>{quest.winner_selection_method === "FIRST_VALID" ? "Earliest valid entries win" : "Best valid submissions win"}</span></div></div>
             <div className="mt-6">{viewer?.id === quest.creator_id ? <Link href={quest.status === "FINALIZED" && quest.reward_enabled ? `/quests/${quest.id}/settlement` : `/quests/${quest.id}/review`} className="block w-full rounded-xl bg-accent px-6 py-4 text-center font-bold text-dark">{quest.status === "FINALIZED" && quest.reward_enabled ? "Track payouts" : "Review submissions"}</Link> : <JoinButton questId={quest.id} isCreator={false} isOpen={isOpen} />}</div>
+            {viewer?.id !== quest.creator_id ? <SaveQuestButton questId={quest.id} initialSaved={initiallySaved} /> : null}
           </div>
         </aside>
       </div>
