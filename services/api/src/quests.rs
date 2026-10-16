@@ -210,6 +210,8 @@ pub enum QuestError {
     CreatorCannotJoin,
     #[error("quest has already been joined")]
     AlreadyJoined,
+    #[error("this quest can no longer be cancelled safely")]
+    CannotCancel,
     #[error("quest service is temporarily unavailable")]
     Database,
 }
@@ -221,7 +223,9 @@ impl ResponseError for QuestError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::InvalidQuest | Self::InvalidDeadline => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotCreator => StatusCode::FORBIDDEN,
-            Self::NotOpen | Self::CreatorCannotJoin | Self::AlreadyJoined => StatusCode::CONFLICT,
+            Self::NotOpen | Self::CreatorCannotJoin | Self::AlreadyJoined | Self::CannotCancel => {
+                StatusCode::CONFLICT
+            }
             Self::Database => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -240,6 +244,7 @@ impl ResponseError for QuestError {
                 Self::NotOpen => "quest_not_open",
                 Self::CreatorCannotJoin => "creator_cannot_join",
                 Self::AlreadyJoined => "quest_already_joined",
+                Self::CannotCancel => "quest_cannot_be_cancelled",
                 Self::Database => "quest_service_unavailable",
                 Self::Auth(_) => unreachable!(),
             },
@@ -702,6 +707,128 @@ pub async fn join_quest(
     ))
 }
 
+#[post("/quests/{quest_id}/close")]
+pub async fn close_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<web::Json<Quest>, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quest_id = quest_id.into_inner();
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| QuestError::Database)?;
+    let quest = sqlx::query_as::<_, (Uuid, String)>(
+        "select creator_id, status::text from public.quests where id = $1 for update",
+    )
+    .bind(quest_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| QuestError::Database)?
+    .ok_or(QuestError::NotFound)?;
+    if quest.0 != user.id {
+        return Err(QuestError::NotCreator);
+    }
+    if quest.1 != "OPEN" {
+        return Err(QuestError::NotOpen);
+    }
+
+    sqlx::query(
+        r#"
+        update public.quests
+        set status = 'CLOSED_FOR_REVIEW', closed_at = now(), updated_at = now()
+        where id = $1
+        "#,
+    )
+    .bind(quest_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| QuestError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| QuestError::Database)?;
+
+    Ok(web::Json(
+        find_creator_quest(&state, quest_id, user.id).await?,
+    ))
+}
+
+fn can_cancel_quest(
+    status: &str,
+    reward_enabled: bool,
+    entry_count: i64,
+    has_funding_intent: bool,
+) -> bool {
+    match status {
+        "DRAFT" => true,
+        "AWAITING_FUNDING" => !has_funding_intent,
+        "OPEN" => !reward_enabled && entry_count == 0,
+        _ => false,
+    }
+}
+
+#[post("/quests/{quest_id}/cancel")]
+pub async fn cancel_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+) -> Result<web::Json<Quest>, QuestError> {
+    let user = state.auth.authenticate(&request).await?;
+    let quest_id = quest_id.into_inner();
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| QuestError::Database)?;
+    let quest = sqlx::query_as::<_, (Uuid, String, bool, i64, bool)>(
+        r#"
+        select q.creator_id,
+               q.status::text,
+               q.reward_enabled,
+               (select count(*) from public.quest_entries e where e.quest_id = q.id),
+               exists (
+                 select 1
+                 from public.reward_pools pool
+                 join public.payment_intents intent on intent.reward_pool_id = pool.id
+                 where pool.quest_id = q.id
+               )
+        from public.quests q
+        where q.id = $1
+        for update
+        "#,
+    )
+    .bind(quest_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| QuestError::Database)?
+    .ok_or(QuestError::NotFound)?;
+    if quest.0 != user.id {
+        return Err(QuestError::NotCreator);
+    }
+    if !can_cancel_quest(&quest.1, quest.2, quest.3, quest.4) {
+        return Err(QuestError::CannotCancel);
+    }
+
+    sqlx::query(
+        "update public.quests set status = 'CANCELLED', closed_at = now(), updated_at = now() where id = $1",
+    )
+    .bind(quest_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| QuestError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| QuestError::Database)?;
+
+    Ok(web::Json(
+        find_creator_quest(&state, quest_id, user.id).await?,
+    ))
+}
+
 #[post("/quests/validate")]
 pub async fn validate_quest(rules: web::Json<QuestRules>) -> impl actix_web::Responder {
     match rules.validate() {
@@ -919,5 +1046,16 @@ mod tests {
             long_search.normalized_search(),
             Err(QuestError::InvalidQuest)
         ));
+    }
+
+    #[test]
+    fn cancellation_rules_protect_entries_and_funded_rewards() {
+        assert!(can_cancel_quest("DRAFT", false, 0, false));
+        assert!(can_cancel_quest("AWAITING_FUNDING", true, 0, false));
+        assert!(!can_cancel_quest("AWAITING_FUNDING", true, 0, true));
+        assert!(can_cancel_quest("OPEN", false, 0, false));
+        assert!(!can_cancel_quest("OPEN", false, 1, false));
+        assert!(!can_cancel_quest("OPEN", true, 0, true));
+        assert!(!can_cancel_quest("CLOSED_FOR_REVIEW", false, 0, false));
     }
 }

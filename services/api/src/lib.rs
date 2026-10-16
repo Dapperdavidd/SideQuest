@@ -65,6 +65,8 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(quests::create_quest)
             .service(quests::publish_quest)
             .service(quests::join_quest)
+            .service(quests::close_quest)
+            .service(quests::cancel_quest)
             .service(quests::save_quest)
             .service(quests::remove_saved_quest)
             .service(quests::validate_quest)

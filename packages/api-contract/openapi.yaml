@@ -233,6 +233,34 @@ paths:
           description: Membership created
         "409":
           description: Quest is closed, already joined, or owned by the user
+  /quests/{questId}/close:
+    post:
+      summary: Close an open quest to new submissions and begin creator review
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Quest is closed for review
+        "403":
+          description: The authenticated user is not the creator
+        "409":
+          description: Quest is not open
+  /quests/{questId}/cancel:
+    post:
+      summary: Cancel a quest only while doing so cannot strand entries or reward funding
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Quest is cancelled
+        "403":
+          description: The authenticated user is not the creator
+        "409":
+          description: Quest has entries, funding activity, or an ineligible lifecycle state
   /quests/{questId}/funding-intents:
     post:
       summary: Create or reuse a server-authoritative NIM funding intent

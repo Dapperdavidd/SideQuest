@@ -257,6 +257,20 @@ class QuestRepository {
     );
   }
 
+  Future<void> closeQuest(String id, String accessToken) async {
+    await _dio.post<void>(
+      '/quests/$id/close',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
+  Future<void> cancelQuest(String id, String accessToken) async {
+    await _dio.post<void>(
+      '/quests/$id/cancel',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
   Future<List<MyQuest>> listMyQuests(String accessToken) async {
     final response = await _dio.get<List<dynamic>>(
       '/users/me/quests',
@@ -4151,6 +4165,65 @@ class MyQuestsScreen extends ConsumerStatefulWidget {
 
 class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
   int selectedTab = 0;
+  String? workingQuestId;
+
+  Future<void> manageQuest(MyQuest quest, String action) async {
+    final session = currentSession;
+    if (session == null || workingQuestId != null) return;
+    if (action == 'cancel') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Cancel this quest?'),
+          content: const Text(
+            'Cancellation is permanent and is allowed only before entries or reward funding make it unsafe.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep quest'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Cancel quest'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    setState(() => workingQuestId = quest.id);
+    try {
+      final repository = ref.read(questRepositoryProvider);
+      if (action == 'close') {
+        await repository.closeQuest(quest.id, session.accessToken);
+      } else {
+        await repository.cancelQuest(quest.id, session.accessToken);
+      }
+      ref.invalidate(myQuestsProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              action == 'close'
+                  ? 'Submissions closed. The quest is ready for review.'
+                  : 'Quest cancelled.',
+            ),
+          ),
+        );
+      }
+    } on DioException catch (error) {
+      if (!mounted) return;
+      final data = error.response?.data;
+      final message = data is Map<String, dynamic>
+          ? data['message'] as String? ?? 'Unable to update this quest.'
+          : 'Unable to update this quest.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => workingQuestId = null);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4266,8 +4339,11 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
                     sliver: SliverList.separated(
                       itemCount: filtered.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) =>
-                          _MyQuestCard(quest: filtered[index]),
+                      itemBuilder: (context, index) => _MyQuestCard(
+                        quest: filtered[index],
+                        working: workingQuestId == filtered[index].id,
+                        onAction: manageQuest,
+                      ),
                     ),
                   );
                 },
@@ -4353,8 +4429,14 @@ class _MyQuestsEmpty extends StatelessWidget {
 }
 
 class _MyQuestCard extends StatelessWidget {
-  const _MyQuestCard({required this.quest});
+  const _MyQuestCard({
+    required this.quest,
+    required this.working,
+    required this.onAction,
+  });
   final MyQuest quest;
+  final bool working;
+  final void Function(MyQuest quest, String action) onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -4364,6 +4446,12 @@ class _MyQuestCard extends StatelessWidget {
         (quest.status == 'CLOSED_FOR_REVIEW' ||
             quest.status == 'REVIEWING' ||
             (open && quest.deadline.isBefore(DateTime.now())));
+    final closable = quest.isCreator && open;
+    final cancellable =
+        quest.isCreator &&
+        (quest.status == 'DRAFT' ||
+            quest.status == 'AWAITING_FUNDING' ||
+            (open && !quest.rewardEnabled && quest.entriesReceived == 0));
     return InkWell(
       onTap: reviewable
           ? () => context.push('/quests/${quest.id}/review')
@@ -4431,6 +4519,31 @@ class _MyQuestCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (closable || cancellable)
+                  working
+                      ? const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : PopupMenuButton<String>(
+                          tooltip: 'Manage quest',
+                          onSelected: (action) => onAction(quest, action),
+                          itemBuilder: (context) => [
+                            if (closable)
+                              const PopupMenuItem(
+                                value: 'close',
+                                child: Text('Close submissions'),
+                              ),
+                            if (cancellable)
+                              const PopupMenuItem(
+                                value: 'cancel',
+                                child: Text('Cancel quest'),
+                              ),
+                          ],
+                        ),
               ],
             ),
             const SizedBox(height: 16),
