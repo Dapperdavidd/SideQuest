@@ -11,6 +11,7 @@ SideQuest does not mark a monetary quest funded because a browser reports that a
 - The existing database already separates reward pools, payment intents, observed transactions, reward allocations, and payouts. Provider references and idempotency keys are unique, and quest opening remains gated on confirmed funding.
 - Authenticated participants can register one checksum-validated TestAlbatross payout destination. Rewarded submissions snapshot that address when the official entry is accepted, so changing a profile later cannot redirect an already-earned reward.
 - Quest finalization atomically creates one immutable reward allocation and one idempotent pending payout for each winner. The pending records deliberately remain unsigned until the isolated signer is configured.
+- The local isolated signer is implemented as a loopback-only service. It validates a bearer token, checks that its Keychain-provided private key derives the configured treasury address, serializes each signed transaction into an owner-only durable ledger before broadcast, and rejects idempotency-key reuse with changed payout details.
 
 References:
 
@@ -28,6 +29,8 @@ The app needs one explicit settlement model:
 3. **Third-party custody/payment provider.** Appropriate for real funds only after provider, legal, fee, webhook-signature, reconciliation, refund, and regional availability review.
 
 Do not place a treasury private key, seed phrase, or raw signing material in `.env`, Supabase, the browser bundle, Flutter assets, source control, or chat.
+
+For the local competition setup, `scripts/configure-local-signer.sh` accepts the private key through a silent terminal prompt and stores it in macOS Keychain. `scripts/start-local-signer.sh` retrieves it only into the signer process environment. The generated API-to-signer token is stored in Keychain and copied into the ignored local `.env` for the API client.
 
 ## Inputs needed for the recommended testnet path
 

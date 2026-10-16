@@ -5,6 +5,7 @@ node_modules/
 dist/
 coverage/
 target/
+.runtime/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies

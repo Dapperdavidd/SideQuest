@@ -1,0 +1,16 @@
+{
+  "name": "@sidequest/nimiq-signer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --import ./src/node-globals.mjs src/server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@nimiq/core": "^2.22.0"
+  }
+}

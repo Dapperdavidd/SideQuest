@@ -8,6 +8,8 @@
     "lint:web": "pnpm --dir apps/web lint",
     "dev:nimiq-verifier": "pnpm --dir services/nimiq-verifier dev",
     "test:nimiq-verifier": "pnpm --dir services/nimiq-verifier test",
+    "start:nimiq-signer": "pnpm --dir services/nimiq-signer start",
+    "test:nimiq-signer": "pnpm --dir services/nimiq-signer test",
     "test:api": "cargo test --manifest-path services/api/Cargo.toml",
     "test:mobile": "flutter test apps/mobile"
   },

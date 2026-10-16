@@ -48,6 +48,20 @@ pnpm dev:nimiq-verifier
 
 The verifier binds to `127.0.0.1:8090` by default, joins the official TestAlbatross seed set, and exposes a health check at `/health`. It never holds treasury signing keys.
 
+Configure the loopback-only payout signer once on macOS:
+
+```bash
+./scripts/configure-local-signer.sh
+```
+
+The setup prompt validates that the entered testnet private key derives the configured SideQuest treasury address. It stores the key and a generated service token in macOS Keychain; the private key is never written to `.env` or the repository. Start the signer in its own terminal:
+
+```bash
+./scripts/start-local-signer.sh
+```
+
+The signer binds only to `127.0.0.1:8091`. It persists signed payout transactions to an ignored, owner-only local ledger before broadcasting, so an API retry reuses the exact same transaction.
+
 Run the API:
 
 ```bash
