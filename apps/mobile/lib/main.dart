@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -2094,6 +2095,29 @@ class _QuestDetail extends ConsumerWidget {
   const _QuestDetail({required this.quest});
   final Quest quest;
 
+  Future<void> shareQuest(BuildContext context) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final questUrl = Uri.parse(webBaseUrl).resolve('/quests/${quest.id}');
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          title: quest.title,
+          subject: 'Join ${quest.title} on SideQuest',
+          text: 'Join “${quest.title}” on SideQuest.\n$questUrl',
+          sharePositionOrigin: box == null
+              ? null
+              : box.localToGlobal(Offset.zero) & box.size,
+        ),
+      );
+    } on PlatformException {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This quest could not be shared.')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final remaining = math.max(0, quest.maxEntries - quest.entriesReceived);
@@ -2110,6 +2134,14 @@ class _QuestDetail extends ConsumerWidget {
             backgroundColor: ink,
             foregroundColor: Colors.white,
             actions: [
+              if (quest.visibility == 'PUBLIC')
+                Builder(
+                  builder: (context) => IconButton(
+                    tooltip: 'Share quest',
+                    onPressed: () => shareQuest(context),
+                    icon: const Icon(Icons.ios_share_rounded),
+                  ),
+                ),
               if (!isCreator && quest.visibility == 'PUBLIC')
                 _SaveQuestAction(questId: quest.id),
             ],

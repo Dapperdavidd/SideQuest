@@ -10,6 +10,7 @@ import { JoinButton } from "./join-button";
 import { SaveQuestButton } from "./save-quest-button";
 import { InvitationPanel } from "./invitation-panel";
 import { ReportContentButton } from "@/components/report-content-button";
+import { ShareQuestButton } from "./share-quest-button";
 
 type QuestPageProps = {
   params: Promise<{ id: string }>;
@@ -75,6 +76,7 @@ async function QuestExperience({ params }: QuestPageProps) {
             <div className="mt-6 space-y-4 border-y border-line py-5 text-sm"><div className="flex items-center gap-3"><CalendarDays size={18} className="text-muted" /><span><strong>{formatDeadline(quest.deadline)}</strong><span className="block text-xs text-muted">{new Date(quest.deadline).toLocaleString()}</span></span></div><div className="flex items-center gap-3"><UsersRound size={18} className="text-muted" /><span>{quest.is_group_challenge ? `Groups of ${quest.required_group_size}` : "Individual entries"}</span></div><div className="flex items-center gap-3"><Trophy size={18} className="text-muted" /><span>{quest.winner_selection_method === "FIRST_VALID" ? "Earliest valid entries win" : "Best valid submissions win"}</span></div></div>
             <div className="mt-6">{viewer?.id === quest.creator_id ? <Link href={quest.status === "FINALIZED" && quest.reward_enabled ? `/quests/${quest.id}/settlement` : `/quests/${quest.id}/review`} className="block w-full rounded-xl bg-accent px-6 py-4 text-center font-bold text-dark">{quest.status === "FINALIZED" && quest.reward_enabled ? "Track payouts" : "Review submissions"}</Link> : <JoinButton questId={quest.id} isCreator={false} isOpen={isOpen} initialJoined={quest.viewer_joined} />}</div>
             {viewer?.id !== quest.creator_id && quest.visibility === "PUBLIC" ? <SaveQuestButton questId={quest.id} initialSaved={initiallySaved} /> : null}
+            {quest.visibility === "PUBLIC" ? <ShareQuestButton questId={quest.id} title={quest.title} /> : null}
             {viewer?.id === quest.creator_id && quest.visibility !== "PUBLIC" && isOpen ? <InvitationPanel questId={quest.id} /> : null}
             {viewer?.id !== quest.creator_id ? <div className="mt-5 flex justify-center"><ReportContentButton subjectType="QUEST" targetId={quest.id} returnPath={`/quests/${quest.id}`} /></div> : null}
           </div>
