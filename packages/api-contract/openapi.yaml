@@ -1492,6 +1492,10 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
+        organization_id:
+          type: [string, "null"]
+          format: uuid
+          description: A verified business profile owned by the creator; null for personal quests.
         cover_media_url:
           type: [string, "null"]
           format: uri
@@ -1589,6 +1593,10 @@ components:
             creator_display_name:
               type: string
             creator_avatar_url:
+              type: [string, "null"]
+            organization_slug:
+              type: [string, "null"]
+            organization_display_name:
               type: [string, "null"]
             status:
               type: string

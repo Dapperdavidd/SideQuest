@@ -4,6 +4,9 @@ export type Quest = {
   creator_username: string;
   creator_display_name: string;
   creator_avatar_url: string | null;
+  organization_id: string | null;
+  organization_slug: string | null;
+  organization_display_name: string | null;
   title: string;
   description: string;
   cover_media_url: string | null;

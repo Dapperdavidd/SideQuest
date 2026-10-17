@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, Plus, QrCode, Trash2, UsersRound, WalletCards, X } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { apiUrl, readApiError, type Quest } from "@/lib/api/quests";
+import { apiUrl, getMyOrganization, readApiError, type Organization, type Quest } from "@/lib/api/quests";
 import { createClient } from "@/lib/supabase/client";
 import { FundingPanel } from "./funding-panel";
 
@@ -46,6 +46,15 @@ export default function CreateQuestPage() {
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<CheckpointDraft[]>([{ title: "", instructions: "" }]);
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [sponsoredByBusiness, setSponsoredByBusiness] = useState(false);
+
+  useEffect(() => {
+    void createClient().auth.getSession().then(({ data: { session } }) => {
+      if (!session) return;
+      void getMyOrganization(session.access_token).then((value) => setOrganization(value)).catch(() => undefined);
+    });
+  }, []);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
   const detailsValid = title.trim().length >= 3 && Boolean(description.trim()) && deadlineValid;
@@ -136,6 +145,7 @@ export default function CreateQuestPage() {
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
+          organization_id: sponsoredByBusiness ? organization?.id ?? null : null,
           cover_media_url: coverMediaUrl,
           location_name: questType === "Explore" && locationReady ? locationName.trim() : null,
           latitude: questType === "Explore" && locationReady ? latitude : null,
@@ -232,6 +242,7 @@ export default function CreateQuestPage() {
                     <button key={type} onClick={() => { setQuestType(type); if (type !== "Explore") setProof((current) => current.filter((item) => item !== "Location")); }} className={`rounded-xl border p-4 text-left ${questType === type ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-display font-bold">{type}</span><span className="mt-1 block text-xs leading-5 text-muted">{type === "Friends" ? "Challenge your circle" : type === "Bounty" ? "Offer a small reward" : "Create a real-world mission"}</span></button>
                   ))}
                 </div>
+                {organization?.verification_status === "VERIFIED" ? <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-background p-4"><input type="checkbox" checked={sponsoredByBusiness} onChange={(event) => setSponsoredByBusiness(event.target.checked)} className="mt-1 h-4 w-4 accent-[#9bc800]" /><span><strong className="block text-sm">Publish as {organization.display_name}</strong><span className="mt-1 block text-xs leading-5 text-muted">Shows the verified business identity on this quest while you remain its accountable creator.</span></span></label> : null}
                 {questType === "Explore" ? <div className="mt-5 rounded-xl border border-line bg-background p-4"><label className="block text-sm font-bold">Quest location <span className="font-normal text-muted">{locationRequired ? "(required for location proof)" : "(optional)"}</span><input value={locationName} onChange={(event) => setLocationName(event.target.value)} maxLength={120} className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Freedom Park, Lagos" /></label><div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={useCurrentLocation} disabled={locating} className="flex items-center gap-2 rounded-full border border-dark/20 bg-white px-4 py-2 text-sm font-bold disabled:opacity-50">{locating ? <LoaderCircle size={16} className="animate-spin" /> : <MapPin size={16} />}{locating ? "Getting location…" : latitude === null ? "Use current location" : "Update coordinates"}</button>{latitude !== null && longitude !== null ? <span className="text-xs font-semibold text-muted">Coordinates added</span> : null}</div>{locationError ? <p role="alert" className="mt-3 text-xs text-[#8f2e1e]">{locationError}</p> : null}<p className="mt-3 text-xs leading-5 text-muted">Participants see the place name. Coordinates power nearby discovery; they are supporting context, not automatic proof.</p></div> : null}
                 <label className="mt-5 flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-dashed border-muted/50 bg-cover bg-center py-5 text-sm font-semibold text-muted" style={coverPreview ? { backgroundImage: `linear-gradient(rgba(23,25,23,.55),rgba(23,25,23,.55)),url(${JSON.stringify(coverPreview)})`, color: "white" } : undefined}><ImagePlus size={19} /> {coverFile ? "Change cover image" : "Add a cover image"}<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => chooseCover(event.target.files?.[0] ?? null)} /></label>
               </div>
@@ -260,7 +271,7 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 5 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ...(questType === "Explore" ? [["Location", locationReady ? locationName.trim() : "Not set"]] : []), ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ...(isGroup ? [["Group instructions", groupInstructions.trim() || "Not set"]] : []), ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ...(checkpointsRequired ? [["Checkpoints", `${checkpoints.length} in order`]] : []), ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="max-w-[65%] whitespace-pre-wrap text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ...(sponsoredByBusiness && organization ? [["Sponsor", organization.display_name]] : []), ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ...(questType === "Explore" ? [["Location", locationReady ? locationName.trim() : "Not set"]] : []), ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ...(isGroup ? [["Group instructions", groupInstructions.trim() || "Not set"]] : []), ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ...(checkpointsRequired ? [["Checkpoints", `${checkpoints.length} in order`]] : []), ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="max-w-[65%] whitespace-pre-wrap text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
             ) : null}
 
             <div className="mt-9 flex items-center justify-between border-t border-line pt-5">

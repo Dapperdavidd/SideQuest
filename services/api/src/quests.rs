@@ -102,6 +102,9 @@ pub struct Quest {
     pub creator_username: String,
     pub creator_display_name: String,
     pub creator_avatar_url: Option<String>,
+    pub organization_id: Option<Uuid>,
+    pub organization_slug: Option<String>,
+    pub organization_display_name: Option<String>,
     pub title: String,
     pub description: String,
     pub cover_media_url: Option<String>,
@@ -136,6 +139,7 @@ pub struct Quest {
 pub struct CreateQuest {
     title: String,
     description: String,
+    organization_id: Option<Uuid>,
     cover_media_url: Option<String>,
     location_name: Option<String>,
     latitude: Option<f64>,
@@ -428,6 +432,9 @@ pub async fn list_quests(
                u.username as creator_username,
                u.display_name as creator_display_name,
                u.avatar_url as creator_avatar_url,
+               organization.id as organization_id,
+               organization.slug as organization_slug,
+               organization.display_name as organization_display_name,
                q.title,
                q.description,
                q.cover_media_url,
@@ -458,6 +465,7 @@ pub async fn list_quests(
                false as viewer_joined
         from public.quests q
         join public.users u on u.id = q.creator_id
+        left join public.organizations organization on organization.id = q.organization_id
         cross join lateral (
           select case
             when $5::double precision is null or q.latitude is null then null
@@ -686,24 +694,39 @@ pub async fn create_quest(
     quest.validate()?;
     let user = state.auth.authenticate(&request).await?;
 
+    if let Some(organization_id) = quest.organization_id {
+        let authorized = sqlx::query_scalar::<_, bool>(
+            "select exists(select 1 from public.organizations where id = $1 and owner_id = $2 and verification_status = 'VERIFIED')",
+        )
+        .bind(organization_id)
+        .bind(user.id)
+        .fetch_one(&state.database)
+        .await
+        .map_err(|_| QuestError::Database)?;
+        if !authorized {
+            return Err(QuestError::InvalidQuest);
+        }
+    }
+
     let created_id = sqlx::query_scalar::<_, Uuid>(
         r#"
         insert into public.quests (
-          creator_id, title, description, cover_media_url,
+          creator_id, organization_id, title, description, cover_media_url,
           location_name, latitude, longitude, quest_type, visibility,
           is_group_challenge, required_group_size, group_instructions, max_entries, winner_count,
           winner_selection_method, proof_requirements, judging_criteria,
           reward_enabled, reward_amount_minor, reward_currency, settlement_asset, deadline
         )
         values (
-          $1, $2, $3, $4, $5, $6, $7, $8::quest_type, $9::quest_visibility,
-          $10, $11, $12, $13, $14, $15::winner_selection_method, $16, $17,
-          $18, $19, $20, $21, $22
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::quest_type, $10::quest_visibility,
+          $11, $12, $13, $14, $15, $16::winner_selection_method, $17, $18,
+          $19, $20, $21, $22, $23
         )
         returning id
         "#,
     )
     .bind(user.id)
+    .bind(quest.organization_id)
     .bind(quest.title.trim())
     .bind(quest.description.trim())
     .bind(quest.cover_media_url.as_deref().map(str::trim))
@@ -1025,6 +1048,9 @@ async fn find_quest(
                u.username as creator_username,
                u.display_name as creator_display_name,
                u.avatar_url as creator_avatar_url,
+               organization.id as organization_id,
+               organization.slug as organization_slug,
+               organization.display_name as organization_display_name,
                q.title,
                q.description,
                q.cover_media_url,
@@ -1058,6 +1084,7 @@ async fn find_quest(
                )) as viewer_joined
         from public.quests q
         join public.users u on u.id = q.creator_id
+        left join public.organizations organization on organization.id = q.organization_id
         where q.id = $1
           and ($2::uuid is null or q.creator_id = $2)
           and (
@@ -1099,6 +1126,7 @@ mod tests {
         CreateQuest {
             title: "Weekend photo walk".to_string(),
             description: "Photograph your favourite local landmark.".to_string(),
+            organization_id: None,
             cover_media_url: None,
             location_name: None,
             latitude: None,

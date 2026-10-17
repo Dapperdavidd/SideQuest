@@ -229,6 +229,9 @@ class Quest {
     this.isGroupChallenge = false,
     this.requiredGroupSize,
     this.groupInstructions,
+    this.organizationId,
+    this.organizationSlug,
+    this.organizationDisplayName,
   });
 
   factory Quest.fromJson(Map<String, dynamic> json) => Quest(
@@ -262,6 +265,9 @@ class Quest {
     isGroupChallenge: json['is_group_challenge'] as bool? ?? false,
     requiredGroupSize: (json['required_group_size'] as num?)?.toInt(),
     groupInstructions: json['group_instructions'] as String?,
+    organizationId: json['organization_id'] as String?,
+    organizationSlug: json['organization_slug'] as String?,
+    organizationDisplayName: json['organization_display_name'] as String?,
   );
 
   final String id;
@@ -292,6 +298,9 @@ class Quest {
   final bool isGroupChallenge;
   final int? requiredGroupSize;
   final String? groupInstructions;
+  final String? organizationId;
+  final String? organizationSlug;
+  final String? organizationDisplayName;
 
   String get image =>
       coverMediaUrl ??
@@ -2561,15 +2570,18 @@ class _QuestDetail extends ConsumerWidget {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton(
-                    onPressed: () =>
-                        context.push('/users/${quest.creatorUsername}'),
+                    onPressed: quest.organizationDisplayName == null
+                        ? () => context.push('/users/${quest.creatorUsername}')
+                        : null,
                     style: TextButton.styleFrom(
                       foregroundColor: muted,
                       padding: EdgeInsets.zero,
                       minimumSize: const Size(0, 32),
                     ),
                     child: Text(
-                      'by ${quest.creator} · @${quest.creatorUsername}',
+                      quest.organizationDisplayName == null
+                          ? 'by ${quest.creator} · @${quest.creatorUsername}'
+                          : 'by ${quest.organizationDisplayName} · verified business',
                     ),
                   ),
                 ),
@@ -5504,6 +5516,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   XFile? coverFile;
   Position? questPosition;
   bool locatingQuest = false;
+  bool sponsoredByBusiness = false;
   final checkpointDrafts = <_CheckpointDraft>[_CheckpointDraft()];
 
   @override
@@ -5621,6 +5634,9 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     var draftCreated = false;
     try {
       final repository = ref.read(questRepositoryProvider);
+      final organization = sponsoredByBusiness
+          ? await repository.getMyOrganization(session.accessToken)
+          : null;
       String? coverMediaUrl;
       if (coverFile != null) {
         final bytes = await coverFile!.readAsBytes();
@@ -5652,6 +5668,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       final created = await repository.createQuest({
         'title': titleController.text.trim(),
         'description': descriptionController.text.trim(),
+        'organization_id': sponsoredByBusiness ? organization?.id : null,
         'cover_media_url': coverMediaUrl,
         'location_name': questType == 'EXPLORE' && locationReady
             ? locationController.text.trim()
@@ -5758,6 +5775,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       );
     }
 
+    final organization = ref.watch(myOrganizationProvider).value;
     const stepNames = ['Quest', 'Proof', 'Winners', 'Review'];
     return Scaffold(
       appBar: AppBar(
@@ -5815,7 +5833,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               child: switch (step) {
-                0 => _buildQuestStep(),
+                0 => _buildQuestStep(organization),
                 1 => _buildProofStep(),
                 2 => _buildWinnerStep(),
                 _ => _buildReviewStep(),
@@ -5904,7 +5922,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     );
   }
 
-  Widget _buildQuestStep() => Column(
+  Widget _buildQuestStep(Organization? organization) => Column(
     key: const ValueKey(0),
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -5960,6 +5978,21 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           }
         }),
       ),
+      if (organization?.verificationStatus == 'VERIFIED') ...[
+        const SizedBox(height: 16),
+        SwitchListTile.adaptive(
+          value: sponsoredByBusiness,
+          onChanged: (value) => setState(() => sponsoredByBusiness = value),
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            'Publish as ${organization!.displayName}',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: const Text(
+            'Show the verified business identity on this quest.',
+          ),
+        ),
+      ],
       if (questType == 'EXPLORE') ...[
         const SizedBox(height: 18),
         Container(
@@ -6411,9 +6444,12 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
 
   Widget _buildReviewStep() {
     final reward = double.tryParse(rewardController.text.trim()) ?? 0;
+    final organization = ref.watch(myOrganizationProvider).value;
     final rows = <(String, String)>[
       ('Quest', titleController.text.trim()),
       ('Type', questType.toLowerCase()),
+      if (sponsoredByBusiness && organization != null)
+        ('Sponsor', organization.displayName),
       if (questType == 'EXPLORE')
         (
           'Location',
