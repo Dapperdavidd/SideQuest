@@ -118,6 +118,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             PublicProfileScreen(username: state.pathParameters['username']!),
       ),
       GoRoute(
+        path: '/users/:username/:connection',
+        builder: (context, state) => ConnectionListScreen(
+          username: state.pathParameters['username']!,
+          connection: state.pathParameters['connection']!,
+          userId: state.uri.queryParameters['userId'] ?? '',
+        ),
+      ),
+      GoRoute(
         path: '/wallet',
         builder: (context, state) => const WalletScreen(),
       ),
@@ -651,6 +659,20 @@ class QuestRepository {
     );
   }
 
+  Future<List<UserProfile>> listFollowers(String userId) async {
+    final response = await _dio.get<List<dynamic>>('/users/$userId/followers');
+    return response.data!
+        .map((json) => UserProfile.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<List<UserProfile>> listFollowing(String userId) async {
+    final response = await _dio.get<List<dynamic>>('/users/$userId/following');
+    return response.data!
+        .map((json) => UserProfile.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
   Future<UserProfile> updateMyProfile(
     Map<String, dynamic> changes,
     String accessToken,
@@ -1059,6 +1081,14 @@ final publicProfileProvider = FutureProvider.autoDispose
       (ref, username) =>
           ref.watch(questRepositoryProvider).getPublicProfile(username),
     );
+typedef ConnectionQuery = ({String userId, String connection});
+final connectionProfilesProvider = FutureProvider.autoDispose
+    .family<List<UserProfile>, ConnectionQuery>((ref, query) {
+      final repository = ref.watch(questRepositoryProvider);
+      return query.connection == 'followers'
+          ? repository.listFollowers(query.userId)
+          : repository.listFollowing(query.userId);
+    });
 final userFollowStateProvider = FutureProvider.autoDispose.family<bool, String>(
   (ref, userId) {
     final session = currentSession;
@@ -6231,6 +6261,145 @@ class _PayoutStatus extends StatelessWidget {
   );
 }
 
+class ConnectionListScreen extends ConsumerWidget {
+  const ConnectionListScreen({
+    required this.username,
+    required this.connection,
+    required this.userId,
+    super.key,
+  });
+
+  final String username;
+  final String connection;
+  final String userId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (userId.isEmpty ||
+        (connection != 'followers' && connection != 'following')) {
+      return const Scaffold(body: Center(child: Text('Profile not found.')));
+    }
+    final query = (userId: userId, connection: connection);
+    final title = connection == 'followers' ? 'Followers' : 'Following';
+    return Scaffold(
+      appBar: AppBar(title: Text(title), backgroundColor: background),
+      body: SafeArea(
+        child: ref
+            .watch(connectionProfilesProvider(query))
+            .when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator(color: ink)),
+              error: (_, _) => Center(
+                child: _QuestFeedError(
+                  onRetry: () =>
+                      ref.invalidate(connectionProfilesProvider(query)),
+                ),
+              ),
+              data: (profiles) => RefreshIndicator(
+                color: ink,
+                onRefresh: () async {
+                  ref.invalidate(connectionProfilesProvider(query));
+                  await ref.read(connectionProfilesProvider(query).future);
+                },
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+                  children: [
+                    Text(
+                      '@$username · ${profiles.length} ${profiles.length == 1 ? 'person' : 'people'}',
+                      style: const TextStyle(color: muted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 16),
+                    if (profiles.isEmpty)
+                      const _EmptyConnectionState()
+                    else
+                      ...profiles.map(
+                        (profile) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Material(
+                            color: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: const BorderSide(color: line),
+                            ),
+                            child: ListTile(
+                              onTap: () =>
+                                  context.push('/users/${profile.username}'),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              leading: profile.avatarUrl == null
+                                  ? CircleAvatar(
+                                      backgroundColor: ink,
+                                      foregroundColor: accent,
+                                      child: Text(
+                                        profile.displayName.characters.first
+                                            .toUpperCase(),
+                                      ),
+                                    )
+                                  : CircleAvatar(
+                                      backgroundImage: NetworkImage(
+                                        profile.avatarUrl!,
+                                      ),
+                                    ),
+                              title: Text(
+                                profile.displayName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text('@${profile.username}'),
+                              trailing: Text(
+                                '${profile.followersCount}',
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+      ),
+    );
+  }
+}
+
+class _EmptyConnectionState extends StatelessWidget {
+  const _EmptyConnectionState();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 320),
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: line),
+    ),
+    child: const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.groups_outlined, size: 38, color: muted),
+        SizedBox(height: 12),
+        Text(
+          'No connections yet',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        SizedBox(height: 4),
+        Text(
+          'People will appear here as the community grows.',
+          style: TextStyle(color: muted, fontSize: 12),
+        ),
+      ],
+    ),
+  );
+}
+
 class PublicProfileScreen extends ConsumerStatefulWidget {
   const PublicProfileScreen({required this.username, super.key});
 
@@ -6405,11 +6574,17 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                           _ProfileStat(
                             value: '${profile.followersCount}',
                             label: 'Followers',
+                            onTap: () => context.push(
+                              '/users/${profile.username}/followers?userId=${profile.id}',
+                            ),
                           ),
                           const SizedBox(width: 8),
                           _ProfileStat(
                             value: '${profile.followingCount}',
                             label: 'Following',
+                            onTap: () => context.push(
+                              '/users/${profile.username}/following?userId=${profile.id}',
+                            ),
                           ),
                           const SizedBox(width: 8),
                           _ProfileStat(
@@ -6789,13 +6964,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             _ProfileStat(
               value: '${profile.followersCount}',
               label: 'Followers',
+              onTap: () => context.push(
+                '/users/${profile.username}/followers?userId=${profile.id}',
+              ),
             ),
           ],
         ),
         const SizedBox(height: 10),
-        Text(
-          '${profile.followingCount} following · ${profile.createdQuestsCount} created',
-          style: const TextStyle(color: muted, fontSize: 12),
+        TextButton(
+          onPressed: () => context.push(
+            '/users/${profile.username}/following?userId=${profile.id}',
+          ),
+          child: Text(
+            '${profile.followingCount} following · ${profile.createdQuestsCount} created',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
         ),
         const SizedBox(height: 28),
         _AchievementSection(
@@ -7047,28 +7230,38 @@ IconData _achievementIcon(String code) => switch (code) {
 };
 
 class _ProfileStat extends StatelessWidget {
-  const _ProfileStat({required this.value, required this.label});
+  const _ProfileStat({required this.value, required this.label, this.onTap});
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Expanded(
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    child: Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: line),
+        side: const BorderSide(color: line),
       ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(label, style: const TextStyle(color: muted, fontSize: 10)),
+            ],
           ),
-          const SizedBox(height: 3),
-          Text(label, style: const TextStyle(color: muted, fontSize: 10)),
-        ],
+        ),
       ),
     ),
   );

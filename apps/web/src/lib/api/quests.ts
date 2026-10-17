@@ -242,6 +242,18 @@ export async function getFollowState(userId: string, accessToken: string): Promi
   return state.following;
 }
 
+export async function getFollowers(userId: string): Promise<PublicProfile[]> {
+  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/followers`), { cache: "no-store" });
+  if (!response.ok) throw new Error("Unable to load followers right now.");
+  return response.json() as Promise<PublicProfile[]>;
+}
+
+export async function getFollowing(userId: string): Promise<PublicProfile[]> {
+  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/following`), { cache: "no-store" });
+  if (!response.ok) throw new Error("Unable to load followed profiles right now.");
+  return response.json() as Promise<PublicProfile[]>;
+}
+
 export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]> {
   const response = await fetch(apiUrl("/users/me/payouts"), {
     headers: { Authorization: `Bearer ${accessToken}` },
