@@ -93,7 +93,7 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
               {quests === null ? (
                 <div className="mt-4 rounded-[1.25rem] border border-[#ffcf5a]/25 bg-[#ffcf5a]/10 p-6"><h3 className="font-bold text-[#ffe3a0]">The quest service is taking a breather.</h3><p className="mt-2 text-sm leading-6 text-white/55">Your account is fine. Refresh in a moment to reconnect to the live feed.</p></div>
               ) : quests.length ? (
-                <div className="mt-4 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{quests.map((quest) => <QuestCard key={quest.id} href={`/quests/${quest.id}`} imageClass={questImageClass(quest.quest_type)} title={quest.title} creator={quest.creator_display_name} reward={quest.reward_enabled ? formatReward(quest) : undefined} entries={`${quest.entries_received}/${quest.max_entries} entries`} deadline={formatDeadline(quest.deadline)} />)}</div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{quests.map((quest) => <QuestCard key={quest.id} href={`/quests/${quest.id}`} imageClass={questImageClass(quest.quest_type)} imageUrl={quest.cover_media_url} title={quest.title} creator={quest.creator_display_name} reward={quest.reward_enabled ? formatReward(quest) : undefined} entries={`${quest.entries_received}/${quest.max_entries} entries`} deadline={formatDeadline(quest.deadline)} />)}</div>
               ) : (
                 <div className="mt-4 rounded-[1.25rem] border border-dashed border-white/15 bg-white/[0.03] p-8 text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-accent text-dark"><Plus size={22} /></span><h3 className="mt-4 font-display text-xl font-bold">The first quest is yours to create.</h3><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/50">Publish a free challenge now. Reward quests stay private until their funding is verified.</p><Link href={viewer ? "/create" : "/auth?next=/create"} className="mt-5 inline-block rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">{viewer ? "Create the first quest" : "Sign in to create"}</Link></div>
               )}
@@ -110,7 +110,7 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
 
 function FeaturedQuest({ quest }: { quest: Quest }) {
   return (
-    <Link href={`/quests/${quest.id}`} className={`${questImageClass(quest.quest_type)} mt-5 block min-h-[310px] rounded-[1.35rem] bg-cover bg-center p-6 sm:p-8`}>
+    <Link href={`/quests/${quest.id}`} className={`${questImageClass(quest.quest_type)} mt-5 block min-h-[310px] rounded-[1.35rem] bg-cover bg-center p-6 sm:p-8`} style={quest.cover_media_url ? { backgroundImage: `linear-gradient(rgba(23,25,23,.12),rgba(23,25,23,.78)),url(${JSON.stringify(quest.cover_media_url)})` } : undefined}>
       <div className="flex min-h-[250px] max-w-xl flex-col justify-end">
         <span className="w-fit rounded-full bg-[#9167ff] px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider">Featured {quest.quest_type.toLowerCase()}</span>
         <h2 className="mt-3 font-display text-3xl font-bold">{quest.title}</h2>
@@ -124,7 +124,7 @@ function FeaturedQuest({ quest }: { quest: Quest }) {
 function QuestSpotlight({ quest }: { quest: Quest }) {
   return (
     <>
-      <div className={`${questImageClass(quest.quest_type)} h-52 rounded-[1.25rem] bg-cover bg-center`} />
+      <div className={`${questImageClass(quest.quest_type)} h-52 rounded-[1.25rem] bg-cover bg-center`} style={quest.cover_media_url ? { backgroundImage: `url(${JSON.stringify(quest.cover_media_url)})` } : undefined} />
       <div className="mt-5 flex items-start justify-between gap-4"><div><span className="rounded-full bg-[#9167ff] px-2.5 py-1 text-[0.62rem] font-bold uppercase">{quest.quest_type}</span><h2 className="mt-3 font-display text-2xl font-bold leading-tight">{quest.title}</h2></div><button aria-label="Save quest" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10"><Bookmark size={18} /></button></div>
       <p className="mt-4 line-clamp-4 text-sm leading-6 text-white/55">{quest.description}</p>
       <dl className="mt-5 grid grid-cols-3 gap-2"><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">{formatReward(quest)}</dt><dd className="text-[0.65rem] text-white/45">per winner</dd></div><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">{quest.winner_count}</dt><dd className="text-[0.65rem] text-white/45">winner{quest.winner_count === 1 ? "" : "s"}</dd></div><div className="rounded-xl border border-white/10 p-3"><dt className="text-lg font-bold">{Math.max(0, quest.max_entries - quest.entries_received)}</dt><dd className="text-[0.65rem] text-white/45">slots left</dd></div></dl>

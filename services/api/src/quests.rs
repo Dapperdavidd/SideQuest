@@ -281,6 +281,13 @@ impl CreateQuest {
             return Err(QuestError::InvalidQuest);
         }
 
+        if self.cover_media_url.as_deref().is_some_and(|url| {
+            let url = url.trim();
+            url.chars().count() > 2048 || !url.starts_with("https://")
+        }) {
+            return Err(QuestError::InvalidQuest);
+        }
+
         match (self.is_group_challenge, self.required_group_size) {
             (true, Some(2..=50)) | (false, None) => {}
             _ => return Err(QuestError::InvalidQuest),
@@ -1002,6 +1009,18 @@ mod tests {
     #[test]
     fn accepts_a_complete_free_quest() {
         assert!(valid_quest().validate().is_ok());
+    }
+
+    #[test]
+    fn accepts_https_cover_media_and_rejects_untrusted_schemes() {
+        let mut quest = valid_quest();
+        quest.cover_media_url = Some(
+            "https://example.supabase.co/storage/v1/object/public/quest-covers/user/cover.webp"
+                .to_string(),
+        );
+        assert!(quest.validate().is_ok());
+        quest.cover_media_url = Some("javascript:alert(1)".to_string());
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
     }
 
     #[test]

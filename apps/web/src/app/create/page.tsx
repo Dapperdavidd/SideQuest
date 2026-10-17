@@ -36,12 +36,20 @@ export default function CreateQuestPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishedQuest, setPublishedQuest] = useState<Quest | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
   const detailsValid = title.trim().length >= 3 && Boolean(description.trim()) && deadlineValid;
 
   function toggleProof(value: string) {
     setProof((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function chooseCover(file: File | null) {
+    if (coverPreview) URL.revokeObjectURL(coverPreview);
+    setCoverFile(file);
+    setCoverPreview(file ? URL.createObjectURL(file) : null);
   }
 
   async function next() {
@@ -54,12 +62,27 @@ export default function CreateQuestPage() {
     setPublishing(true);
     setPublishError(null);
 
+    const supabase = createClient();
+    let uploadedCoverPath: string | null = null;
+    let draftCreated = false;
     try {
-      const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.push("/auth?next=/create");
         return;
+      }
+
+      let coverMediaUrl: string | null = null;
+      if (coverFile) {
+        if (coverFile.size > 10 * 1024 * 1024) throw new Error("Cover images cannot exceed 10 MB.");
+        const extension = coverFile.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "jpg";
+        uploadedCoverPath = `${session.user.id}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from("quest-covers").upload(uploadedCoverPath, coverFile, {
+          contentType: coverFile.type,
+          upsert: false,
+        });
+        if (uploadError) throw new Error(uploadError.message);
+        coverMediaUrl = supabase.storage.from("quest-covers").getPublicUrl(uploadedCoverPath).data.publicUrl;
       }
 
       const createdResponse = await fetch(apiUrl("/quests"), {
@@ -71,7 +94,7 @@ export default function CreateQuestPage() {
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
-          cover_media_url: null,
+          cover_media_url: coverMediaUrl,
           quest_type: questType.toUpperCase(),
           visibility,
           is_group_challenge: isGroup,
@@ -90,6 +113,7 @@ export default function CreateQuestPage() {
       });
       if (!createdResponse.ok) throw new Error(await readApiError(createdResponse, "The quest could not be created."));
       const created = await createdResponse.json() as Quest;
+      draftCreated = true;
 
       const publishResponse = await fetch(apiUrl(`/quests/${created.id}/publish`), {
         method: "POST",
@@ -101,6 +125,7 @@ export default function CreateQuestPage() {
 
       if (published.status === "OPEN") router.push(`/quests/${published.id}`);
     } catch (error) {
+      if (uploadedCoverPath && !draftCreated) await supabase.storage.from("quest-covers").remove([uploadedCoverPath]);
       setPublishError(error instanceof Error ? error.message : "The quest could not be published.");
     } finally {
       setPublishing(false);
@@ -144,7 +169,7 @@ export default function CreateQuestPage() {
                     <button key={type} onClick={() => setQuestType(type)} className={`rounded-xl border p-4 text-left ${questType === type ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-display font-bold">{type}</span><span className="mt-1 block text-xs leading-5 text-muted">{type === "Friends" ? "Challenge your circle" : type === "Bounty" ? "Offer a small reward" : "Create a real-world mission"}</span></button>
                   ))}
                 </div>
-                <button className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-muted/50 py-5 text-sm font-semibold text-muted"><ImagePlus size={19} /> Add a cover image</button>
+                <label className="mt-5 flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-dashed border-muted/50 bg-cover bg-center py-5 text-sm font-semibold text-muted" style={coverPreview ? { backgroundImage: `linear-gradient(rgba(23,25,23,.55),rgba(23,25,23,.55)),url(${JSON.stringify(coverPreview)})`, color: "white" } : undefined}><ImagePlus size={19} /> {coverFile ? "Change cover image" : "Add a cover image"}<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => chooseCover(event.target.files?.[0] ?? null)} /></label>
               </div>
             ) : null}
 
@@ -183,7 +208,7 @@ export default function CreateQuestPage() {
 
         <aside className="hidden lg:block">
           <div className="sticky top-8 overflow-hidden rounded-[1.5rem] border border-line bg-dark text-white shadow-[0_20px_60px_rgba(23,25,23,0.10)]">
-            <div className="grid h-44 place-items-center bg-[radial-gradient(circle_at_75%_20%,rgba(199,255,0,0.38),transparent_24%),linear-gradient(135deg,#2f382a,#111411)]"><ImagePlus className="text-white/35" size={34} /></div>
+            <div className="grid h-44 place-items-center bg-[radial-gradient(circle_at_75%_20%,rgba(199,255,0,0.38),transparent_24%),linear-gradient(135deg,#2f382a,#111411)] bg-cover bg-center" style={coverPreview ? { backgroundImage: `linear-gradient(rgba(23,25,23,.18),rgba(23,25,23,.18)),url(${JSON.stringify(coverPreview)})` } : undefined}>{coverPreview ? null : <ImagePlus className="text-white/35" size={34} />}</div>
             <div className="p-5"><span className="rounded-full bg-accent px-2.5 py-1 text-[0.62rem] font-bold uppercase text-dark">{questType}</span><h2 className="mt-4 font-display text-xl font-bold leading-tight">{title || "Your quest title"}</h2><p className="mt-2 text-sm leading-6 text-white/55">{description || "A clear description will help people know exactly what to do."}</p><div className="mt-5 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-white/[0.06] p-3"><strong>{maxEntries}</strong><span className="mt-1 block text-[0.6rem] text-white/40">entries</span></div><div className="rounded-xl bg-white/[0.06] p-3"><strong>{winners}</strong><span className="mt-1 block text-[0.6rem] text-white/40">winner{winners > 1 ? "s" : ""}</span></div><div className="rounded-xl bg-white/[0.06] p-3"><strong>{rewardEnabled ? `${rewardAmount} NIM` : "Fun"}</strong><span className="mt-1 block text-[0.6rem] text-white/40">reward</span></div></div><button className="mt-5 w-full rounded-xl bg-accent py-3 text-sm font-bold text-dark">Take this quest</button></div>
           </div>
         </aside>

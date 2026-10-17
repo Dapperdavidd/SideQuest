@@ -46,7 +46,7 @@ async function QuestExperience({ params }: QuestPageProps) {
 
       <div className="mx-auto grid max-w-6xl gap-7 px-5 py-7 lg:grid-cols-[minmax(0,1fr)_350px] lg:px-8 lg:py-10">
         <article>
-          <div className={`${questImageClass(quest.quest_type)} min-h-[320px] rounded-[1.5rem] bg-cover bg-center p-6 text-white sm:min-h-[420px] sm:p-9`}>
+          <div className={`${questImageClass(quest.quest_type)} min-h-[320px] rounded-[1.5rem] bg-cover bg-center p-6 text-white sm:min-h-[420px] sm:p-9`} style={quest.cover_media_url ? { backgroundImage: `linear-gradient(rgba(23,25,23,.08),rgba(23,25,23,.82)),url(${JSON.stringify(quest.cover_media_url)})` } : undefined}>
             <div className="flex min-h-[272px] max-w-2xl flex-col justify-end sm:min-h-[348px]">
               <span className="w-fit rounded-full bg-[#9167ff] px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider">{quest.quest_type}</span>
               <h1 className="mt-4 font-display text-4xl font-bold tracking-tight sm:text-5xl">{quest.title}</h1>

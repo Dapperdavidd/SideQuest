@@ -4,6 +4,7 @@ import Link from "next/link";
 type QuestCardProps = {
   href: string;
   imageClass: string;
+  imageUrl?: string | null;
   title: string;
   creator: string;
   reward?: string;
@@ -11,10 +12,10 @@ type QuestCardProps = {
   deadline: string;
 };
 
-export function QuestCard({ href, imageClass, title, creator, reward, entries, deadline }: QuestCardProps) {
+export function QuestCard({ href, imageClass, imageUrl, title, creator, reward, entries, deadline }: QuestCardProps) {
   return (
     <Link href={href} className="group block overflow-hidden rounded-[1.15rem] border border-line bg-surface shadow-[0_14px_42px_rgba(24,27,24,0.06)] transition hover:-translate-y-1 hover:shadow-[0_18px_56px_rgba(24,27,24,0.12)]">
-      <div className={`${imageClass} h-44 bg-cover bg-center p-4 text-white`}>
+      <div className={`${imageClass} h-44 bg-cover bg-center p-4 text-white`} style={imageUrl ? { backgroundImage: `linear-gradient(rgba(23,25,23,.12),rgba(23,25,23,.72)),url(${JSON.stringify(imageUrl)})` } : undefined}>
         <div className="flex h-full flex-col justify-end">
           {reward ? <span className="mb-2 w-fit rounded-full bg-accent px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.12em] text-dark">{reward} reward</span> : null}
           <h3 className="font-display text-lg font-bold leading-tight">{title}</h3>

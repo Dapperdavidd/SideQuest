@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -4508,6 +4509,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   bool rewardEnabled = false;
   bool publishing = false;
   String? errorMessage;
+  XFile? coverFile;
 
   @override
   void dispose() {
@@ -4554,6 +4556,15 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     });
   }
 
+  Future<void> chooseCover() async {
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 2400,
+    );
+    if (image != null && mounted) setState(() => coverFile = image);
+  }
+
   Future<void> publish() async {
     final session = currentSession;
     if (session == null) {
@@ -4569,12 +4580,42 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       publishing = true;
       errorMessage = null;
     });
+    String? uploadedCoverPath;
+    var draftCreated = false;
     try {
       final repository = ref.read(questRepositoryProvider);
+      String? coverMediaUrl;
+      if (coverFile != null) {
+        final bytes = await coverFile!.readAsBytes();
+        if (bytes.length > 10 * 1024 * 1024) {
+          throw const StorageException('Cover images cannot exceed 10 MB.');
+        }
+        final extension = coverFile!.name.contains('.')
+            ? coverFile!.name.split('.').last.toLowerCase()
+            : 'jpg';
+        final nonce = math.Random.secure()
+            .nextInt(0x7fffffff)
+            .toRadixString(16);
+        uploadedCoverPath =
+            '${session.user.id}/${DateTime.now().microsecondsSinceEpoch}_$nonce.$extension';
+        await Supabase.instance.client.storage
+            .from('quest-covers')
+            .uploadBinary(
+              uploadedCoverPath,
+              bytes,
+              fileOptions: FileOptions(
+                contentType: coverFile!.mimeType ?? 'image/jpeg',
+                upsert: false,
+              ),
+            );
+        coverMediaUrl = Supabase.instance.client.storage
+            .from('quest-covers')
+            .getPublicUrl(uploadedCoverPath);
+      }
       final created = await repository.createQuest({
         'title': titleController.text.trim(),
         'description': descriptionController.text.trim(),
-        'cover_media_url': null,
+        'cover_media_url': coverMediaUrl,
         'quest_type': questType,
         'visibility': visibility,
         'is_group_challenge': isGroup,
@@ -4594,6 +4635,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'settlement_asset': rewardEnabled ? 'NIM' : null,
         'deadline': deadline.toUtc().toIso8601String(),
       }, session.accessToken);
+      draftCreated = true;
       final published = await repository.publishQuest(
         created.id,
         session.accessToken,
@@ -4623,11 +4665,19 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         );
         if (mounted) context.go('/my-quests');
       }
-    } on DioException catch (error) {
-      final data = error.response?.data;
+    } on Object catch (error) {
+      if (uploadedCoverPath != null && !draftCreated) {
+        await Supabase.instance.client.storage
+            .from('quest-covers')
+            .remove([uploadedCoverPath])
+            .catchError((_) => const <FileObject>[]);
+      }
+      final data = error is DioException ? error.response?.data : null;
       setState(() {
         errorMessage = data is Map<String, dynamic>
             ? data['message'] as String? ?? 'The quest could not be published.'
+            : error is StorageException
+            ? error.message
             : 'The quest could not be published.';
       });
     } finally {
@@ -4843,6 +4893,63 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         ],
         selected: {questType},
         onSelectionChanged: (value) => setState(() => questType = value.first),
+      ),
+      const SizedBox(height: 18),
+      InkWell(
+        onTap: chooseCover,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          height: 150,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: line),
+          ),
+          child: coverFile == null
+              ? const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add_photo_alternate_outlined, color: muted),
+                    SizedBox(height: 8),
+                    Text(
+                      'Add a cover image',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'JPG, PNG or WebP · up to 10 MB',
+                      style: TextStyle(color: muted, fontSize: 11),
+                    ),
+                  ],
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.file(File(coverFile!.path), fit: BoxFit.cover),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Color(0xB8171917)],
+                        ),
+                      ),
+                    ),
+                    const Positioned(
+                      left: 14,
+                      bottom: 12,
+                      child: Text(
+                        'Tap to change cover',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
       ),
     ],
   );

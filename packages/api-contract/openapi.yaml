@@ -1027,6 +1027,8 @@ components:
           maxLength: 2000
         cover_media_url:
           type: [string, "null"]
+          format: uri
+          maxLength: 2048
         quest_type:
           type: string
           enum: [FRIENDS, BOUNTY, EXPLORE]
