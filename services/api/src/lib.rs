@@ -4,6 +4,7 @@ pub mod entries;
 pub mod invitations;
 pub mod moderation;
 pub mod notifications;
+pub mod organizations;
 pub mod payments;
 pub mod profiles;
 pub mod quests;
@@ -71,6 +72,11 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(profiles::unblock_user)
             .service(profiles::list_followers)
             .service(profiles::list_following)
+            .service(organizations::create_organization)
+            .service(organizations::get_my_organization)
+            .service(organizations::get_organization)
+            .service(organizations::update_organization)
+            .service(organizations::get_organization_analytics)
             .service(quests::list_quests)
             .service(quests::list_my_quests)
             .service(quests::list_saved_quests)
