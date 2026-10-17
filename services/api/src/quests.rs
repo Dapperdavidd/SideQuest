@@ -113,6 +113,7 @@ pub struct Quest {
     pub visibility: String,
     pub is_group_challenge: bool,
     pub required_group_size: Option<i16>,
+    pub group_instructions: Option<String>,
     pub max_entries: i16,
     pub winner_count: i16,
     pub winner_selection_method: String,
@@ -145,6 +146,7 @@ pub struct CreateQuest {
     #[serde(default)]
     is_group_challenge: bool,
     required_group_size: Option<u16>,
+    group_instructions: Option<String>,
     max_entries: u8,
     winner_count: u8,
     winner_selection_method: WinnerSelectionMethod,
@@ -363,8 +365,14 @@ impl CreateQuest {
             _ => return Err(QuestError::InvalidQuest),
         }
 
-        match (self.is_group_challenge, self.required_group_size) {
-            (true, Some(2..=50)) | (false, None) => {}
+        match (
+            self.is_group_challenge,
+            self.required_group_size,
+            self.group_instructions.as_deref(),
+        ) {
+            (true, Some(2..=50), Some(instructions))
+                if (3..=500).contains(&instructions.trim().chars().count()) => {}
+            (false, None, None) => {}
             _ => return Err(QuestError::InvalidQuest),
         }
 
@@ -431,6 +439,7 @@ pub async fn list_quests(
                q.visibility::text as visibility,
                q.is_group_challenge,
                q.required_group_size,
+               q.group_instructions,
                q.max_entries,
                q.winner_count,
                q.winner_selection_method::text as winner_selection_method,
@@ -682,14 +691,14 @@ pub async fn create_quest(
         insert into public.quests (
           creator_id, title, description, cover_media_url,
           location_name, latitude, longitude, quest_type, visibility,
-          is_group_challenge, required_group_size, max_entries, winner_count,
+          is_group_challenge, required_group_size, group_instructions, max_entries, winner_count,
           winner_selection_method, proof_requirements, judging_criteria,
           reward_enabled, reward_amount_minor, reward_currency, settlement_asset, deadline
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8::quest_type, $9::quest_visibility,
-          $10, $11, $12, $13, $14::winner_selection_method, $15, $16,
-          $17, $18, $19, $20, $21
+          $10, $11, $12, $13, $14, $15::winner_selection_method, $16, $17,
+          $18, $19, $20, $21, $22
         )
         returning id
         "#,
@@ -705,6 +714,7 @@ pub async fn create_quest(
     .bind(quest.visibility.as_str())
     .bind(quest.is_group_challenge)
     .bind(quest.required_group_size.map(|size| size as i16))
+    .bind(quest.group_instructions.as_deref().map(str::trim))
     .bind(i16::from(quest.max_entries))
     .bind(i16::from(quest.winner_count))
     .bind(quest.winner_selection_method.as_database_value())
@@ -1026,6 +1036,7 @@ async fn find_quest(
                q.visibility::text as visibility,
                q.is_group_challenge,
                q.required_group_size,
+               q.group_instructions,
                q.max_entries,
                q.winner_count,
                q.winner_selection_method::text as winner_selection_method,
@@ -1096,6 +1107,7 @@ mod tests {
             visibility: "PUBLIC".to_string(),
             is_group_challenge: false,
             required_group_size: None,
+            group_instructions: None,
             max_entries: 5,
             winner_count: 1,
             winner_selection_method: WinnerSelectionMethod::FirstValid,
@@ -1112,6 +1124,19 @@ mod tests {
     #[test]
     fn accepts_product_limits() {
         assert!(rules(10, 3).validate().is_ok());
+    }
+
+    #[test]
+    fn group_quests_require_bounded_instructions() {
+        let mut quest = valid_quest();
+        quest.is_group_challenge = true;
+        quest.required_group_size = Some(6);
+        quest.group_instructions =
+            Some("Meet at the café and include all six people in one photo.".to_string());
+        assert!(quest.validate().is_ok());
+
+        quest.group_instructions = Some("x".to_string());
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
     }
 
     #[test]

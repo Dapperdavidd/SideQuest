@@ -15,6 +15,7 @@ export type Quest = {
   visibility: "PUBLIC" | "PRIVATE" | "INVITE_ONLY";
   is_group_challenge: boolean;
   required_group_size: number | null;
+  group_instructions: string | null;
   max_entries: number;
   winner_count: number;
   winner_selection_method: "FIRST_VALID" | "BEST_SUBMISSION";

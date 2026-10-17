@@ -226,6 +226,9 @@ class Quest {
     this.latitude,
     this.longitude,
     this.distanceKm,
+    this.isGroupChallenge = false,
+    this.requiredGroupSize,
+    this.groupInstructions,
   });
 
   factory Quest.fromJson(Map<String, dynamic> json) => Quest(
@@ -256,6 +259,9 @@ class Quest {
     latitude: (json['latitude'] as num?)?.toDouble(),
     longitude: (json['longitude'] as num?)?.toDouble(),
     distanceKm: (json['distance_km'] as num?)?.toDouble(),
+    isGroupChallenge: json['is_group_challenge'] as bool? ?? false,
+    requiredGroupSize: (json['required_group_size'] as num?)?.toInt(),
+    groupInstructions: json['group_instructions'] as String?,
   );
 
   final String id;
@@ -283,6 +289,9 @@ class Quest {
   final double? latitude;
   final double? longitude;
   final double? distanceKm;
+  final bool isGroupChallenge;
+  final int? requiredGroupSize;
+  final String? groupInstructions;
 
   String get image =>
       coverMediaUrl ??
@@ -2537,6 +2546,31 @@ class _QuestDetail extends ConsumerWidget {
                               ),
                             ],
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (quest.groupInstructions != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF2FFD0),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Group of ${quest.requiredGroupSize}',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          quest.groupInstructions!,
+                          style: const TextStyle(color: muted, height: 1.45),
                         ),
                       ],
                     ),
@@ -5387,6 +5421,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   final criteriaController = TextEditingController();
   final rewardController = TextEditingController(text: '10');
   final locationController = TextEditingController();
+  final groupInstructionsController = TextEditingController();
   int step = 0;
   String questType = 'FRIENDS';
   String visibility = 'PUBLIC';
@@ -5412,6 +5447,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     criteriaController.dispose();
     rewardController.dispose();
     locationController.dispose();
+    groupInstructionsController.dispose();
     for (final checkpoint in checkpointDrafts) {
       checkpoint.dispose();
     }
@@ -5425,6 +5461,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           deadline.isAfter(DateTime.now()),
     1 =>
       proofRequirements.isNotEmpty &&
+          (!isGroup || groupInstructionsController.text.trim().length >= 3) &&
           (!proofRequirements.contains('LOCATION') || locationReady) &&
           (!proofRequirements.contains('QR_CHECKPOINT') || checkpointsReady),
     2 =>
@@ -5563,6 +5600,9 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'visibility': visibility,
         'is_group_challenge': isGroup,
         'required_group_size': isGroup ? groupSize : null,
+        'group_instructions': isGroup
+            ? groupInstructionsController.text.trim()
+            : null,
         'max_entries': maxEntries,
         'winner_count': winnerCount,
         'winner_selection_method': selectionMethod,
@@ -6034,6 +6074,18 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             label: '$groupSize people',
             onChanged: (value) => setState(() => groupSize = value.round()),
           ),
+          TextField(
+            controller: groupInstructionsController,
+            minLines: 3,
+            maxLines: 5,
+            maxLength: 500,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              labelText: 'Group instructions',
+              hintText: 'Explain who should be in the group and what everyone needs to do together.',
+              border: OutlineInputBorder(),
+            ),
+          ),
         ],
         const SizedBox(height: 16),
         const Text(
@@ -6304,6 +6356,8 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       ('Access', visibility == 'PUBLIC' ? 'public' : 'invitation link only'),
       ('Deadline', _shortDate(deadline)),
       ('Participation', isGroup ? 'Group of $groupSize' : 'Individual'),
+      if (isGroup)
+        ('Group instructions', groupInstructionsController.text.trim()),
       ('Entries', '$maxEntries maximum'),
       (
         'Winners',

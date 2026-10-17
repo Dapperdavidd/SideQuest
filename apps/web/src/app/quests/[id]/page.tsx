@@ -68,6 +68,7 @@ async function QuestExperience({ params }: QuestPageProps) {
             <div className="mt-3 flex flex-wrap gap-2">{quest.proof_requirements.map((proof) => <span key={proof} className="flex items-center gap-2 rounded-full bg-accent-soft px-3 py-2 text-xs font-bold"><CheckCircle2 size={15} /> {proof.replaceAll("_", " ").toLowerCase()}</span>)}</div>
 
             {quest.judging_criteria ? <div className="mt-8 rounded-xl bg-background p-5"><h3 className="font-bold">Published judging criteria</h3><p className="mt-2 text-sm leading-6 text-muted">{quest.judging_criteria}</p></div> : null}
+            {quest.group_instructions ? <div className="mt-5 rounded-xl bg-accent-soft p-5"><h3 className="font-bold">Group instructions</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted">{quest.group_instructions}</p></div> : null}
           </section>
 
           {quest.proof_requirements.includes("QR_CHECKPOINT") ? <CheckpointPanel questId={quest.id} initialCheckpoints={checkpoints} isCreator={viewer?.id === quest.creator_id} joined={quest.viewer_joined} isOpen={isOpen} /> : null}

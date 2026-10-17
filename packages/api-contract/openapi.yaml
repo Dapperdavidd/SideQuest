@@ -1378,6 +1378,11 @@ components:
           type: [integer, "null"]
           minimum: 2
           maximum: 50
+        group_instructions:
+          type: [string, "null"]
+          minLength: 3
+          maxLength: 500
+          description: Required when is_group_challenge is true and null otherwise.
         max_entries:
           type: integer
           minimum: 1
