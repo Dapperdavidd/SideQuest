@@ -62,6 +62,26 @@ paths:
                 $ref: "#/components/schemas/Organization"
         "404":
           description: Business profile is missing or not publicly verified
+  /organizations/{slug}/quests:
+    get:
+      summary: List public quests attributed to a verified business
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sponsored quest history ordered by publication time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrganizationQuest"
+        "404":
+          description: Business profile is missing or not publicly verified
   /organizations/{organizationId}:
     patch:
       summary: Update an owner-managed business profile without changing verification state
@@ -1109,6 +1129,32 @@ components:
             created_at:
               type: string
               format: date-time
+    OrganizationQuest:
+      type: object
+      required: [id, title, quest_type, status, deadline, reward_enabled, entries_received]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        quest_type:
+          type: string
+          enum: [FRIENDS, BOUNTY, EXPLORE]
+        status:
+          type: string
+        cover_media_url:
+          type: [string, "null"]
+        deadline:
+          type: string
+          format: date-time
+        reward_enabled:
+          type: boolean
+        reward_amount_minor:
+          type: [integer, "null"]
+        entries_received:
+          type: integer
+          minimum: 0
     CreateCheckpoint:
       type: object
       required: [title]

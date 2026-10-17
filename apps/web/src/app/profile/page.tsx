@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { ArrowLeft, Award, Compass, LogOut, Sparkles, Trophy, WalletCards } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { AchievementGrid } from "@/components/achievement-grid";
-import { getAchievements, getCreatorAnalytics, getMyOrganization, getPublicProfile } from "@/lib/api/quests";
+import { getAchievements, getCreatorAnalytics, getMyOrganization, getOrganizationAnalytics, getPublicProfile } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { signOut } from "./actions";
 import { PayoutDestinationForm } from "./payout-destination-form";
@@ -34,6 +34,7 @@ async function ProfileContent() {
   ]);
 
   const firstName = viewer.displayName.split(/\s+/)[0] || "Explorer";
+  const businessAnalytics = organization ? await getOrganizationAnalytics(organization.id, session.access_token).catch(() => null) : null;
   const initial = firstName.charAt(0).toUpperCase();
 
   return (
@@ -89,7 +90,7 @@ async function ProfileContent() {
           </div>
         </section>
 
-        <BusinessProfilePanel initialOrganization={organization} />
+        <BusinessProfilePanel initialOrganization={organization} analytics={businessAnalytics} />
 
         <section className="px-5 pb-10 sm:px-10">
           <h2 className="font-display text-xl font-bold">Account</h2>

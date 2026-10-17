@@ -73,6 +73,19 @@ pub struct OrganizationAnalytics {
     rewards_paid_minor: i64,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+pub struct OrganizationQuest {
+    id: Uuid,
+    title: String,
+    quest_type: String,
+    status: String,
+    cover_media_url: Option<String>,
+    deadline: DateTime<Utc>,
+    reward_enabled: bool,
+    reward_amount_minor: Option<i64>,
+    entries_received: i64,
+}
+
 #[derive(Debug, Error)]
 pub enum OrganizationError {
     #[error(transparent)]
@@ -235,6 +248,43 @@ pub async fn get_organization(
     ))
 }
 
+#[get("/organizations/{slug}/quests")]
+pub async fn list_organization_quests(
+    state: web::Data<AppState>,
+    slug: web::Path<String>,
+) -> Result<web::Json<Vec<OrganizationQuest>>, OrganizationError> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "select exists(select 1 from public.organizations where slug = $1 and verification_status = 'VERIFIED')",
+    )
+    .bind(slug.as_str())
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| OrganizationError::Database)?;
+    if !exists {
+        return Err(OrganizationError::NotFound);
+    }
+    let quests = sqlx::query_as::<_, OrganizationQuest>(
+        r#"
+        select q.id, q.title, q.quest_type::text as quest_type,
+               q.status::text as status, q.cover_media_url, q.deadline,
+               q.reward_enabled, q.reward_amount_minor,
+               (select count(*) from public.quest_entries entry where entry.quest_id = q.id) as entries_received
+        from public.quests q
+        join public.organizations organization on organization.id = q.organization_id
+        where organization.slug = $1
+          and q.visibility = 'PUBLIC'
+          and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
+        order by q.published_at desc nulls last
+        limit 50
+        "#,
+    )
+    .bind(slug.as_str())
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| OrganizationError::Database)?;
+    Ok(web::Json(quests))
+}
+
 #[patch("/organizations/{id}")]
 pub async fn update_organization(
     request: HttpRequest,
@@ -295,7 +345,7 @@ pub async fn get_organization_analytics(
                coalesce(sum((select count(*) from public.quest_winners winner where winner.quest_id = q.id)), 0)::bigint as winners_selected,
                coalesce(sum((select coalesce(sum(payout.amount_minor), 0) from public.payouts payout join public.reward_allocations allocation on allocation.id = payout.reward_allocation_id join public.reward_pools pool on pool.id = allocation.reward_pool_id where pool.quest_id = q.id and payout.status = 'CONFIRMED')), 0)::bigint as rewards_paid_minor
         from public.organizations organization
-        left join public.quests q on q.creator_id = organization.owner_id
+        left join public.quests q on q.organization_id = organization.id
         where organization.id = $1 and organization.owner_id = $2
         group by organization.id
         "#,

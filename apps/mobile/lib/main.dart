@@ -883,6 +883,17 @@ class QuestRepository {
     return CreatorAnalytics.fromJson(response.data!);
   }
 
+  Future<CreatorAnalytics> getOrganizationAnalytics(
+    String organizationId,
+    String accessToken,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/organizations/$organizationId/analytics',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return CreatorAnalytics.fromJson(response.data!);
+  }
+
   Future<UserProfile> getPublicProfile(String username) async {
     final response = await _dio.get<Map<String, dynamic>>('/users/$username');
     return UserProfile.fromJson(response.data!);
@@ -1396,6 +1407,14 @@ final myOrganizationProvider = FutureProvider.autoDispose<Organization?>((ref) {
       .watch(questRepositoryProvider)
       .getMyOrganization(session.accessToken);
 });
+final organizationAnalyticsProvider = FutureProvider.autoDispose
+    .family<CreatorAnalytics, String>((ref, organizationId) {
+      final session = currentSession;
+      if (session == null) throw StateError('Authentication required');
+      return ref
+          .watch(questRepositoryProvider)
+          .getOrganizationAnalytics(organizationId, session.accessToken);
+    });
 final publicProfileProvider = FutureProvider.autoDispose
     .family<UserProfile, String>(
       (ref, username) =>
@@ -9068,6 +9087,14 @@ class _BusinessProfileSectionState
                           style: const TextStyle(color: muted, height: 1.45),
                         ),
                       ],
+                      const SizedBox(height: 18),
+                      _CreatorAnalyticsSection(
+                        analytics: ref.watch(
+                          organizationAnalyticsProvider(organization.id),
+                        ),
+                        title: 'Business overview',
+                        subtitle: 'Only quests published under this verified business identity.',
+                      ),
                       const SizedBox(height: 14),
                       OutlinedButton.icon(
                         onPressed: () => setState(() => editing = true),
@@ -9108,8 +9135,14 @@ class _ProfileAvatar extends StatelessWidget {
 }
 
 class _CreatorAnalyticsSection extends StatelessWidget {
-  const _CreatorAnalyticsSection({required this.analytics});
+  const _CreatorAnalyticsSection({
+    required this.analytics,
+    this.title = 'Creator overview',
+    this.subtitle = 'Calculated from official quest and payout records.',
+  });
   final AsyncValue<CreatorAnalytics> analytics;
+  final String title;
+  final String subtitle;
 
   @override
   Widget build(BuildContext context) => analytics.when(
@@ -9126,15 +9159,12 @@ class _CreatorAnalyticsSection extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Creator overview',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Calculated from official quest and payout records.',
-            style: TextStyle(color: muted, fontSize: 12),
-          ),
+          Text(subtitle, style: const TextStyle(color: muted, fontSize: 12)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,

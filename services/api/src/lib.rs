@@ -75,6 +75,7 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(organizations::create_organization)
             .service(organizations::get_my_organization)
             .service(organizations::get_organization)
+            .service(organizations::list_organization_quests)
             .service(organizations::update_organization)
             .service(organizations::get_organization_analytics)
             .service(quests::list_quests)

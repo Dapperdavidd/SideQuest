@@ -91,6 +91,18 @@ export type Organization = {
   created_at: string;
 };
 
+export type OrganizationQuest = {
+  id: string;
+  title: string;
+  quest_type: Quest["quest_type"];
+  status: string;
+  cover_media_url: string | null;
+  deadline: string;
+  reward_enabled: boolean;
+  reward_amount_minor: number | null;
+  entries_received: number;
+};
+
 export type QuestCheckpoint = {
   id: string;
   quest_id: string;
@@ -324,6 +336,21 @@ export async function getOrganization(slug: string, accessToken?: string): Promi
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Unable to load this business profile right now.");
   return response.json() as Promise<Organization>;
+}
+
+export async function getOrganizationQuests(slug: string): Promise<OrganizationQuest[]> {
+  const response = await fetch(apiUrl(`/organizations/${encodeURIComponent(slug)}/quests`), { cache: "no-store" });
+  if (!response.ok) return [];
+  return response.json() as Promise<OrganizationQuest[]>;
+}
+
+export async function getOrganizationAnalytics(id: string, accessToken: string): Promise<CreatorAnalytics> {
+  const response = await fetch(apiUrl(`/organizations/${encodeURIComponent(id)}/analytics`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load business analytics right now.");
+  return response.json() as Promise<CreatorAnalytics>;
 }
 
 export async function getFollowState(userId: string, accessToken: string): Promise<boolean> {
