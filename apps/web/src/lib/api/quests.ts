@@ -61,6 +61,14 @@ export type Achievement = {
   unlocked: boolean;
 };
 
+export type CreatorAnalytics = {
+  active_quests: number;
+  entries_received: number;
+  valid_submissions: number;
+  winners_selected: number;
+  rewards_paid_minor: number;
+};
+
 export type ApiErrorBody = {
   code?: string;
   message?: string;
@@ -233,6 +241,15 @@ export async function getAchievements(username: string): Promise<Achievement[]> 
   const response = await fetch(apiUrl(`/users/${encodeURIComponent(username)}/achievements`), { cache: "no-store" });
   if (!response.ok) return [];
   return response.json() as Promise<Achievement[]>;
+}
+
+export async function getCreatorAnalytics(accessToken: string): Promise<CreatorAnalytics> {
+  const response = await fetch(apiUrl("/users/me/creator-analytics"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load creator analytics right now.");
+  return response.json() as Promise<CreatorAnalytics>;
 }
 
 export async function getFollowState(userId: string, accessToken: string): Promise<boolean> {

@@ -367,6 +367,31 @@ class Achievement {
   final bool unlocked;
 }
 
+class CreatorAnalytics {
+  const CreatorAnalytics({
+    required this.activeQuests,
+    required this.entriesReceived,
+    required this.validSubmissions,
+    required this.winnersSelected,
+    required this.rewardsPaidMinor,
+  });
+
+  factory CreatorAnalytics.fromJson(Map<String, dynamic> json) =>
+      CreatorAnalytics(
+        activeQuests: (json['active_quests'] as num).toInt(),
+        entriesReceived: (json['entries_received'] as num).toInt(),
+        validSubmissions: (json['valid_submissions'] as num).toInt(),
+        winnersSelected: (json['winners_selected'] as num).toInt(),
+        rewardsPaidMinor: (json['rewards_paid_minor'] as num).toInt(),
+      );
+
+  final int activeQuests;
+  final int entriesReceived;
+  final int validSubmissions;
+  final int winnersSelected;
+  final int rewardsPaidMinor;
+}
+
 class QuestRepository {
   QuestRepository([Dio? dio])
     : _dio = dio ?? Dio(BaseOptions(baseUrl: apiBaseUrl));
@@ -639,6 +664,14 @@ class QuestRepository {
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
     return UserProfile.fromJson(response.data!);
+  }
+
+  Future<CreatorAnalytics> getCreatorAnalytics(String accessToken) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/users/me/creator-analytics',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return CreatorAnalytics.fromJson(response.data!);
   }
 
   Future<UserProfile> getPublicProfile(String username) async {
@@ -1124,6 +1157,15 @@ final myProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) {
   final session = currentSession;
   if (session == null) throw StateError('Authentication required');
   return ref.watch(questRepositoryProvider).getMyProfile(session.accessToken);
+});
+final creatorAnalyticsProvider = FutureProvider.autoDispose<CreatorAnalytics>((
+  ref,
+) {
+  final session = currentSession;
+  if (session == null) throw StateError('Authentication required');
+  return ref
+      .watch(questRepositoryProvider)
+      .getCreatorAnalytics(session.accessToken);
 });
 final publicProfileProvider = FutureProvider.autoDispose
     .family<UserProfile, String>(
@@ -7409,6 +7451,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             style: const TextStyle(color: muted, fontSize: 12),
           ),
         ),
+        const SizedBox(height: 18),
+        _CreatorAnalyticsSection(
+          analytics: ref.watch(creatorAnalyticsProvider),
+        ),
         const SizedBox(height: 28),
         _AchievementSection(
           achievements: ref.watch(achievementsProvider(profile.username)),
@@ -7555,6 +7601,76 @@ class _ProfileAvatar extends StatelessWidget {
             )
           : null,
     ),
+  );
+}
+
+class _CreatorAnalyticsSection extends StatelessWidget {
+  const _CreatorAnalyticsSection({required this.analytics});
+  final AsyncValue<CreatorAnalytics> analytics;
+
+  @override
+  Widget build(BuildContext context) => analytics.when(
+    loading: () => const LinearProgressIndicator(color: ink),
+    error: (_, _) => const SizedBox.shrink(),
+    data: (value) {
+      final items = [
+        ('${value.activeQuests}', 'Active'),
+        ('${value.entriesReceived}', 'Entries'),
+        ('${value.validSubmissions}', 'Valid'),
+        ('${value.winnersSelected}', 'Winners'),
+        ('${(value.rewardsPaidMinor / 100000).toStringAsFixed(2)} NIM', 'Paid'),
+      ];
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Creator overview',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Calculated from official quest and payout records.',
+            style: TextStyle(color: muted, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: items
+                .map(
+                  (item) => Container(
+                    width: 96,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: line),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.$1,
+                          maxLines: 1,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          item.$2,
+                          style: const TextStyle(color: muted, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ],
+      );
+    },
   );
 }
 

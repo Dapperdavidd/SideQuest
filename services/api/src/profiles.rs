@@ -37,6 +37,15 @@ pub struct BlockState {
     blocked: bool,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+pub struct CreatorAnalytics {
+    active_quests: i64,
+    entries_received: i64,
+    valid_submissions: i64,
+    winners_selected: i64,
+    rewards_paid_minor: i64,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Achievement {
     code: &'static str,
@@ -193,6 +202,29 @@ pub async fn get_me(
     let user = state.auth.authenticate(&request).await?;
     let profile = find_by_id(&state, user.id).await?;
     Ok(web::Json(profile))
+}
+
+#[get("/users/me/creator-analytics")]
+pub async fn get_creator_analytics(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<CreatorAnalytics>, ProfileError> {
+    let user = state.auth.authenticate(&request).await?;
+    let analytics = sqlx::query_as::<_, CreatorAnalytics>(
+        r#"
+        select
+          (select count(*) from public.quests q where q.creator_id = $1 and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING')) as active_quests,
+          (select count(*) from public.quest_entries e join public.quests q on q.id = e.quest_id where q.creator_id = $1) as entries_received,
+          (select count(*) from public.entry_reviews r join public.quest_entries e on e.id = r.entry_id join public.quests q on q.id = e.quest_id where q.creator_id = $1 and r.is_valid) as valid_submissions,
+          (select count(*) from public.quest_winners w join public.quests q on q.id = w.quest_id where q.creator_id = $1) as winners_selected,
+          (select coalesce(sum(p.amount_minor), 0) from public.payouts p join public.reward_allocations a on a.id = p.reward_allocation_id join public.reward_pools pool on pool.id = a.reward_pool_id join public.quests q on q.id = pool.quest_id where q.creator_id = $1 and p.status = 'CONFIRMED') as rewards_paid_minor
+        "#,
+    )
+    .bind(user.id)
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| ProfileError::Database)?;
+    Ok(web::Json(analytics))
 }
 
 #[patch("/users/me")]

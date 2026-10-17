@@ -58,6 +58,7 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
     config.service(health).service(
         web::scope("/api/v1")
             .service(profiles::get_me)
+            .service(profiles::get_creator_analytics)
             .service(profiles::update_me)
             .service(profiles::get_profile)
             .service(profiles::get_achievements)

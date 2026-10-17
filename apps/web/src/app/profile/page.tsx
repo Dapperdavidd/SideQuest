@@ -5,10 +5,11 @@ import { Suspense } from "react";
 import { ArrowLeft, Award, Compass, LogOut, Sparkles, Trophy, WalletCards } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { AchievementGrid } from "@/components/achievement-grid";
-import { getAchievements, getPublicProfile } from "@/lib/api/quests";
+import { getAchievements, getCreatorAnalytics, getPublicProfile } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { signOut } from "./actions";
 import { PayoutDestinationForm } from "./payout-destination-form";
+import { createClient } from "@/lib/supabase/server";
 
 export default function ProfilePage() {
   return (
@@ -21,9 +22,13 @@ export default function ProfilePage() {
 async function ProfileContent() {
   const viewer = await getViewer();
   if (!viewer) redirect("/auth");
-  const [stats, achievements] = await Promise.all([
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) redirect("/auth");
+  const [stats, achievements, analytics] = await Promise.all([
     getPublicProfile(viewer.username).catch(() => null),
     getAchievements(viewer.username).catch(() => []),
+    getCreatorAnalytics(session.access_token).catch(() => null),
   ]);
 
   const firstName = viewer.displayName.split(/\s+/)[0] || "Explorer";
@@ -66,6 +71,20 @@ async function ProfileContent() {
           <h2 className="font-display text-xl font-bold">Achievements</h2>
           <p className="mt-1 text-sm text-white/45">Unlocked only by official SideQuest activity.</p>
           <div className="mt-4"><AchievementGrid achievements={achievements} dark /></div>
+        </section>
+
+        <section className="px-5 pb-8 sm:px-10">
+          <h2 className="font-display text-xl font-bold">Creator overview</h2>
+          <p className="mt-1 text-sm text-white/45">Calculated from official quest, review, winner, and payout records.</p>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {[
+              [analytics?.active_quests ?? 0, "Active quests"],
+              [analytics?.entries_received ?? 0, "Entries"],
+              [analytics?.valid_submissions ?? 0, "Valid"],
+              [analytics?.winners_selected ?? 0, "Winners"],
+              [`${((analytics?.rewards_paid_minor ?? 0) / 100000).toLocaleString(undefined, { maximumFractionDigits: 5 })} NIM`, "Paid"],
+            ].map(([value, label]) => <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><strong className="block text-xl text-accent">{value}</strong><span className="mt-1 block text-xs text-white/45">{label}</span></div>)}
+          </div>
         </section>
 
         <section className="px-5 pb-10 sm:px-10">

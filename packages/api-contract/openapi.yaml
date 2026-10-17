@@ -26,6 +26,20 @@ paths:
           description: Username is already taken
         "422":
           description: Profile fields are invalid
+  /users/me/creator-analytics:
+    get:
+      summary: Get authoritative analytics for quests created by the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Aggregate creator activity and confirmed NIM payouts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorAnalytics"
+        "401":
+          description: Missing, invalid, or expired access token
   /users/{username}:
     get:
       summary: Get a public profile by username
@@ -834,6 +848,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    CreatorAnalytics:
+      type: object
+      required: [active_quests, entries_received, valid_submissions, winners_selected, rewards_paid_minor]
+      properties:
+        active_quests:
+          type: integer
+          minimum: 0
+        entries_received:
+          type: integer
+          minimum: 0
+        valid_submissions:
+          type: integer
+          minimum: 0
+        winners_selected:
+          type: integer
+          minimum: 0
+        rewards_paid_minor:
+          type: integer
+          minimum: 0
     CreateReport:
       type: object
       required: [subject_type, target_id, reason]
