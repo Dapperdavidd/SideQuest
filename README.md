@@ -90,6 +90,8 @@ cargo test --manifest-path services/api/Cargo.toml
 flutter test apps/mobile
 ```
 
+The same formatting, test, analysis, lint, and production-build checks run automatically on every push to `main` and on pull requests through `.github/workflows/ci.yml`.
+
 ## Configuration
 
 Copy the root `.env.example` for the API and `apps/web/.env.example` to `apps/web/.env.local` for the Next.js client. Provide a Supabase project URL and publishable key to activate email, Google, and Apple authentication. Provider dashboards must include the local and production callback URLs. Apple activation additionally requires Apple Developer identifiers and signing credentials.

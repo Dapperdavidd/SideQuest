@@ -1,12 +1,39 @@
-name: CI
+name: Verify SideQuest
 
 on:
   push:
+    branches: [main]
   pull_request:
 
+concurrency:
+  group: sidequest-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  web:
+  api:
+    name: Rust API
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/api
+      - run: cargo fmt --check
+      - run: cargo test --locked
+
+  web:
+    name: Next.js web
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8080/api/v1
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -17,15 +44,22 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint:web
-      - run: pnpm build:web
+      - run: pnpm --filter web lint
+      - run: pnpm --filter web build --webpack
 
-  api:
+  mobile:
+    name: Flutter mobile
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: subosito/flutter-action@v2
         with:
-          workspaces: services/api
-      - run: cargo test --manifest-path services/api/Cargo.toml
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
