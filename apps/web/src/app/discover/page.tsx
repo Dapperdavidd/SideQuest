@@ -50,10 +50,10 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
   const questType = ["FRIENDS", "BOUNTY", "EXPLORE"].includes(requested.type ?? "")
     ? requested.type as Quest["quest_type"]
     : undefined;
-  const viewerPromise = getViewer();
-  const questsPromise = listQuests({ search, questType }).catch(() => null);
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
+  const viewerPromise = getViewer();
+  const questsPromise = listQuests({ search, questType }, session?.access_token).catch(() => null);
   const unreadPromise = session ? getUnreadNotificationCount(session.access_token) : Promise.resolve(0);
   const [viewer, quests, unreadNotifications] = await Promise.all([viewerPromise, questsPromise, unreadPromise]);
   const firstName = viewer?.displayName.split(/\s+/)[0] || "Explorer";

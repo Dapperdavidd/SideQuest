@@ -163,12 +163,15 @@ export function apiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
-export async function listQuests(filters: { search?: string; questType?: Quest["quest_type"] } = {}): Promise<Quest[]> {
+export async function listQuests(filters: { search?: string; questType?: Quest["quest_type"] } = {}, accessToken?: string): Promise<Quest[]> {
   const query = new URLSearchParams();
   if (filters.search?.trim()) query.set("search", filters.search.trim());
   if (filters.questType) query.set("quest_type", filters.questType);
   const suffix = query.size ? `?${query.toString()}` : "";
-  const response = await fetch(apiUrl(`/quests${suffix}`), { cache: "no-store" });
+  const response = await fetch(apiUrl(`/quests${suffix}`), {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    cache: "no-store",
+  });
   if (!response.ok) throw new Error("Unable to load quests right now.");
   return response.json() as Promise<Quest[]>;
 }
@@ -240,6 +243,16 @@ export async function getFollowState(userId: string, accessToken: string): Promi
   if (!response.ok) return false;
   const state = await response.json() as { following: boolean };
   return state.following;
+}
+
+export async function getBlockState(userId: string, accessToken: string): Promise<boolean> {
+  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/block-state`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) return false;
+  const state = await response.json() as { blocked: boolean };
+  return state.blocked;
 }
 
 export async function getFollowers(userId: string): Promise<PublicProfile[]> {

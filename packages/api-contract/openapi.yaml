@@ -108,6 +108,54 @@ paths:
       responses:
         "200":
           description: User is not followed
+  /users/{userId}/block-state:
+    get:
+      summary: Check whether the authenticated user blocked another user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current block state
+  /users/{userId}/block:
+    post:
+      summary: Block a user and remove follows in both directions
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User is blocked
+        "404":
+          description: User not found
+        "409":
+          description: Users cannot block themselves
+    delete:
+      summary: Unblock a user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User is unblocked
   /users/{userId}/followers:
     get:
       summary: List a user's followers

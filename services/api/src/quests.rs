@@ -355,12 +355,14 @@ impl CreateQuest {
 
 #[get("/quests")]
 pub async fn list_quests(
+    request: HttpRequest,
     state: web::Data<AppState>,
     query: web::Query<QuestListQuery>,
 ) -> Result<web::Json<Vec<Quest>>, QuestError> {
     let limit = query.limit.unwrap_or(20).clamp(1, 50);
     let search = query.normalized_search()?;
     let quest_type = query.normalized_quest_type()?;
+    let viewer = state.auth.authenticate_optional(&request).await?;
     let quests = sqlx::query_as::<_, Quest>(
         r#"
         select q.id,
@@ -397,6 +399,14 @@ pub async fn list_quests(
           and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
           and ($2::text is null or q.quest_type::text = $2)
           and (
+            $4::uuid is null
+            or not exists (
+              select 1 from public.user_blocks b
+              where (b.blocker_id = $4 and b.blocked_id = q.creator_id)
+                 or (b.blocker_id = q.creator_id and b.blocked_id = $4)
+            )
+          )
+          and (
             $3::text is null
             or q.title ilike '%' || $3 || '%'
             or q.description ilike '%' || $3 || '%'
@@ -410,6 +420,7 @@ pub async fn list_quests(
     .bind(limit)
     .bind(quest_type)
     .bind(search)
+    .bind(viewer.map(|user| user.id))
     .fetch_all(&state.database)
     .await
     .map_err(|_| QuestError::Database)?;

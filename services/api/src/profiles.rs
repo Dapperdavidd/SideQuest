@@ -31,6 +31,12 @@ pub struct FollowState {
     following: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BlockState {
+    user_id: Uuid,
+    blocked: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Achievement {
     code: &'static str,
@@ -109,6 +115,10 @@ pub enum ProfileError {
     UsernameTaken,
     #[error("users cannot follow themselves")]
     CannotFollowSelf,
+    #[error("users cannot block themselves")]
+    CannotBlockSelf,
+    #[error("this interaction is unavailable because one of these users blocked the other")]
+    BlockedInteraction,
     #[error("profile service is temporarily unavailable")]
     Database,
 }
@@ -122,7 +132,9 @@ impl ResponseError for ProfileError {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             Self::UsernameTaken => StatusCode::CONFLICT,
-            Self::CannotFollowSelf => StatusCode::CONFLICT,
+            Self::CannotFollowSelf | Self::CannotBlockSelf | Self::BlockedInteraction => {
+                StatusCode::CONFLICT
+            }
             Self::Database => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -138,6 +150,8 @@ impl ResponseError for ProfileError {
                 Self::InvalidUsername | Self::InvalidDisplayName | Self::InvalidBio => "invalid_profile",
                 Self::UsernameTaken => "username_taken",
                 Self::CannotFollowSelf => "cannot_follow_self",
+                Self::CannotBlockSelf => "cannot_block_self",
+                Self::BlockedInteraction => "blocked_interaction",
                 Self::Database => "profile_service_unavailable",
                 Self::Auth(_) => unreachable!(),
             },
@@ -275,6 +289,23 @@ pub async fn follow_user(
     if !target_exists {
         return Err(ProfileError::NotFound);
     }
+    let blocked = sqlx::query_scalar::<_, bool>(
+        r#"
+        select exists(
+          select 1 from public.user_blocks
+          where (blocker_id = $1 and blocked_id = $2)
+             or (blocker_id = $2 and blocked_id = $1)
+        )
+        "#,
+    )
+    .bind(viewer.id)
+    .bind(user_id)
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| ProfileError::Database)?;
+    if blocked {
+        return Err(ProfileError::BlockedInteraction);
+    }
     sqlx::query(
         "insert into public.user_follows (follower_id, followed_id) values ($1, $2) on conflict do nothing",
     )
@@ -306,6 +337,102 @@ pub async fn unfollow_user(
     Ok(web::Json(FollowState {
         user_id,
         following: false,
+    }))
+}
+
+#[get("/users/{user_id}/block-state")]
+pub async fn get_block_state(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    user_id: web::Path<Uuid>,
+) -> Result<web::Json<BlockState>, ProfileError> {
+    let viewer = state.auth.authenticate(&request).await?;
+    let user_id = user_id.into_inner();
+    let blocked = sqlx::query_scalar::<_, bool>(
+        "select exists(select 1 from public.user_blocks where blocker_id = $1 and blocked_id = $2)",
+    )
+    .bind(viewer.id)
+    .bind(user_id)
+    .fetch_one(&state.database)
+    .await
+    .map_err(|_| ProfileError::Database)?;
+    Ok(web::Json(BlockState { user_id, blocked }))
+}
+
+#[post("/users/{user_id}/block")]
+pub async fn block_user(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    user_id: web::Path<Uuid>,
+) -> Result<web::Json<BlockState>, ProfileError> {
+    let viewer = state.auth.authenticate(&request).await?;
+    let user_id = user_id.into_inner();
+    if viewer.id == user_id {
+        return Err(ProfileError::CannotBlockSelf);
+    }
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| ProfileError::Database)?;
+    sqlx::query(
+        "insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2) on conflict do nothing",
+    )
+    .bind(viewer.id)
+    .bind(user_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| {
+        if error
+            .as_database_error()
+            .and_then(|database| database.code())
+            .as_deref()
+            == Some("23503")
+        {
+            ProfileError::NotFound
+        } else {
+            ProfileError::Database
+        }
+    })?;
+    sqlx::query(
+        r#"
+        delete from public.user_follows
+        where (follower_id = $1 and followed_id = $2)
+           or (follower_id = $2 and followed_id = $1)
+        "#,
+    )
+    .bind(viewer.id)
+    .bind(user_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ProfileError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ProfileError::Database)?;
+    Ok(web::Json(BlockState {
+        user_id,
+        blocked: true,
+    }))
+}
+
+#[delete("/users/{user_id}/block")]
+pub async fn unblock_user(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    user_id: web::Path<Uuid>,
+) -> Result<web::Json<BlockState>, ProfileError> {
+    let viewer = state.auth.authenticate(&request).await?;
+    let user_id = user_id.into_inner();
+    sqlx::query("delete from public.user_blocks where blocker_id = $1 and blocked_id = $2")
+        .bind(viewer.id)
+        .bind(user_id)
+        .execute(&state.database)
+        .await
+        .map_err(|_| ProfileError::Database)?;
+    Ok(web::Json(BlockState {
+        user_id,
+        blocked: false,
     }))
 }
 

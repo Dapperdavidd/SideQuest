@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { ArrowLeft, Sparkles, Trophy, UserRound } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { AchievementGrid } from "@/components/achievement-grid";
-import { getAchievements, getFollowState, getPublicProfile } from "@/lib/api/quests";
+import { getAchievements, getBlockState, getFollowState, getPublicProfile } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { FollowButton } from "./follow-button";
@@ -27,7 +27,8 @@ async function PublicProfileContent({ params }: PublicProfilePageProps) {
   const [profile, achievements, viewer, { data: { session } }] = await Promise.all([profilePromise, achievementsPromise, viewerPromise, sessionPromise]);
   if (!profile) notFound();
   const ownProfile = viewer?.id === profile.id;
-  const following = session && !ownProfile ? await getFollowState(profile.id, session.access_token) : false;
+  const blocked = session && !ownProfile ? await getBlockState(profile.id, session.access_token) : false;
+  const following = session && !ownProfile && !blocked ? await getFollowState(profile.id, session.access_token) : false;
   const initial = profile.display_name.trim().charAt(0).toUpperCase() || "S";
 
   const stats = [

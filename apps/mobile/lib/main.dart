@@ -374,7 +374,15 @@ class QuestRepository {
   final Dio _dio;
 
   Future<List<Quest>> listQuests() async {
-    final response = await _dio.get<List<dynamic>>('/quests');
+    final session = currentSession;
+    final response = await _dio.get<List<dynamic>>(
+      '/quests',
+      options: session == null
+          ? null
+          : Options(
+              headers: {'Authorization': 'Bearer ${session.accessToken}'},
+            ),
+    );
     return response.data!
         .map((json) => Quest.fromJson(json as Map<String, dynamic>))
         .toList(growable: false);
@@ -658,6 +666,27 @@ class QuestRepository {
       '/users/$userId/follow',
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
+  }
+
+  Future<bool> getBlockState(String userId, String accessToken) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/users/$userId/block-state',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!['blocked'] as bool;
+  }
+
+  Future<void> setUserBlocked(
+    String userId,
+    bool blocked,
+    String accessToken,
+  ) async {
+    final options = Options(headers: {'Authorization': 'Bearer $accessToken'});
+    if (blocked) {
+      await _dio.post<void>('/users/$userId/block', options: options);
+    } else {
+      await _dio.delete<void>('/users/$userId/block', options: options);
+    }
   }
 
   Future<void> submitReport(
@@ -1118,6 +1147,16 @@ final userFollowStateProvider = FutureProvider.autoDispose.family<bool, String>(
         .getFollowState(userId, session.accessToken);
   },
 );
+final userBlockStateProvider = FutureProvider.autoDispose.family<bool, String>((
+  ref,
+  userId,
+) {
+  final session = currentSession;
+  if (session == null || session.user.id == userId) return false;
+  return ref
+      .watch(questRepositoryProvider)
+      .getBlockState(userId, session.accessToken);
+});
 final payoutDestinationProvider =
     FutureProvider.autoDispose<PayoutDestination?>((ref) {
       final session = currentSession;
@@ -6740,6 +6779,56 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
     }
   }
 
+  Future<void> toggleBlock(UserProfile profile, bool blocked) async {
+    final session = currentSession;
+    if (session == null) {
+      context.push('/auth?next=/users/${widget.username}');
+      return;
+    }
+    if (!blocked) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Block @${profile.username}?'),
+          content: const Text(
+            'Following connections in both directions will be removed, and their quests will be hidden from your discovery feed.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Block'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    setState(() => working = true);
+    try {
+      await ref
+          .read(questRepositoryProvider)
+          .setUserBlocked(profile.id, !blocked, session.accessToken);
+      ref.invalidate(userBlockStateProvider(profile.id));
+      ref.invalidate(userFollowStateProvider(profile.id));
+      ref.invalidate(publicProfileProvider(widget.username));
+      ref.invalidate(questsProvider);
+    } on DioException catch (error) {
+      if (!mounted) return;
+      final data = error.response?.data;
+      final message = data is Map<String, dynamic>
+          ? data['message'] as String? ?? 'Unable to update this block.'
+          : 'Unable to update this block.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.watch(authStateProvider);
@@ -6762,6 +6851,13 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
               ),
               data: (profile) {
                 final ownProfile = currentSession?.user.id == profile.id;
+                final blocked = ownProfile
+                    ? false
+                    : ref
+                              .watch(userBlockStateProvider(profile.id))
+                              .asData
+                              ?.value ??
+                          false;
                 final following = ownProfile
                     ? false
                     : ref
@@ -6774,6 +6870,7 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                   onRefresh: () async {
                     ref.invalidate(publicProfileProvider(widget.username));
                     ref.invalidate(userFollowStateProvider(profile.id));
+                    ref.invalidate(userBlockStateProvider(profile.id));
                     ref.invalidate(achievementsProvider(widget.username));
                     await ref.read(
                       publicProfileProvider(widget.username).future,
@@ -6839,6 +6936,14 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                           ),
                           child: const Text('Manage profile'),
                         )
+                      else if (blocked)
+                        OutlinedButton.icon(
+                          onPressed: working
+                              ? null
+                              : () => toggleBlock(profile, true),
+                          icon: const Icon(Icons.person_add_alt_rounded),
+                          label: const Text('Unblock profile'),
+                        )
                       else
                         FilledButton.icon(
                           onPressed: working
@@ -6867,16 +6972,29 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                         ),
                       if (!ownProfile) ...[
                         const SizedBox(height: 8),
-                        TextButton.icon(
-                          onPressed: () => showReportSheet(
-                            context,
-                            ref,
-                            subjectType: 'USER',
-                            targetId: profile.id,
-                            returnPath: '/users/${profile.username}',
-                          ),
-                          icon: const Icon(Icons.flag_outlined, size: 17),
-                          label: const Text('Report profile'),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () => showReportSheet(
+                                context,
+                                ref,
+                                subjectType: 'USER',
+                                targetId: profile.id,
+                                returnPath: '/users/${profile.username}',
+                              ),
+                              icon: const Icon(Icons.flag_outlined, size: 17),
+                              label: const Text('Report profile'),
+                            ),
+                            if (!blocked)
+                              TextButton.icon(
+                                onPressed: working
+                                    ? null
+                                    : () => toggleBlock(profile, false),
+                                icon: const Icon(Icons.block_rounded, size: 17),
+                                label: const Text('Block profile'),
+                              ),
+                          ],
                         ),
                       ],
                       const SizedBox(height: 24),
