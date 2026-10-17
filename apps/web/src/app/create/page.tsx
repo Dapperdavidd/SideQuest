@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, UsersRound, WalletCards, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, Plus, QrCode, Trash2, UsersRound, WalletCards, X } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { apiUrl, readApiError, type Quest } from "@/lib/api/quests";
 import { createClient } from "@/lib/supabase/client";
@@ -12,6 +12,7 @@ import { FundingPanel } from "./funding-panel";
 type QuestType = "Friends" | "Bounty" | "Explore";
 type SelectionMethod = "First valid" | "Best submission";
 type Visibility = "PUBLIC" | "PRIVATE" | "INVITE_ONLY";
+type CheckpointDraft = { title: string; instructions: string };
 
 const stepNames = ["Quest", "People", "Proof", "Winners", "Reward", "Review"];
 
@@ -43,15 +44,26 @@ export default function CreateQuestPage() {
   const [longitude, setLongitude] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [checkpoints, setCheckpoints] = useState<CheckpointDraft[]>([{ title: "", instructions: "" }]);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
   const detailsValid = title.trim().length >= 3 && Boolean(description.trim()) && deadlineValid;
   const locationReady = locationName.trim().length >= 2 && latitude !== null && longitude !== null;
   const locationRequired = proof.includes("Location");
+  const checkpointsRequired = proof.includes("QR checkpoint");
+  const checkpointsReady = !checkpointsRequired || (checkpoints.length > 0 && checkpoints.every((checkpoint) => checkpoint.title.trim().length >= 2 && (!checkpoint.instructions.trim() || checkpoint.instructions.trim().length >= 2)));
 
   function toggleProof(value: string) {
     if (value === "Location") setQuestType("Explore");
     setProof((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function updateCheckpoint(index: number, field: keyof CheckpointDraft, value: string) {
+    setCheckpoints((current) => current.map((checkpoint, checkpointIndex) => checkpointIndex === index ? { ...checkpoint, [field]: value } : checkpoint));
+  }
+
+  function removeCheckpoint(index: number) {
+    setCheckpoints((current) => current.filter((_, checkpointIndex) => checkpointIndex !== index));
   }
 
   function chooseCover(file: File | null) {
@@ -147,6 +159,23 @@ export default function CreateQuestPage() {
       const created = await createdResponse.json() as Quest;
       draftCreated = true;
 
+      if (checkpointsRequired) {
+        for (const checkpoint of checkpoints) {
+          const checkpointResponse = await fetch(apiUrl(`/quests/${created.id}/checkpoints`), {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              title: checkpoint.title.trim(),
+              instructions: checkpoint.instructions.trim() || null,
+            }),
+          });
+          if (!checkpointResponse.ok) throw new Error(await readApiError(checkpointResponse, "A checkpoint could not be added to the saved draft."));
+        }
+      }
+
       const publishResponse = await fetch(apiUrl(`/quests/${created.id}/publish`), {
         method: "POST",
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -217,7 +246,7 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 2 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 3 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">How do they prove it?</h1><p className="mt-2 text-sm text-muted">Choose one or more evidence types.</p><div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3">{["Photo", "Video", "Link", "Text", "QR checkpoint", "Location"].map((value) => <button key={value} onClick={() => toggleProof(value)} className={`rounded-xl border p-4 text-left text-sm font-bold ${proof.includes(value) ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}>{proof.includes(value) ? <Check size={16} className="mb-4" /> : <MapPin size={16} className="mb-4 text-muted" />}{value}</button>)}</div>{locationRequired && !locationReady ? <p className="mt-4 rounded-xl bg-[#fff7df] p-3 text-sm text-[#72500a]">Location proof needs a place name and coordinates. Go back to the Quest step and use the location control.</p> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 3 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">How do they prove it?</h1><p className="mt-2 text-sm text-muted">Choose one or more evidence types.</p><div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3">{["Photo", "Video", "Link", "Text", "QR checkpoint", "Location"].map((value) => <button key={value} onClick={() => toggleProof(value)} className={`rounded-xl border p-4 text-left text-sm font-bold ${proof.includes(value) ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}>{proof.includes(value) ? <Check size={16} className="mb-4" /> : value === "QR checkpoint" ? <QrCode size={16} className="mb-4 text-muted" /> : <MapPin size={16} className="mb-4 text-muted" />}{value}</button>)}</div>{locationRequired && !locationReady ? <p className="mt-4 rounded-xl bg-[#fff7df] p-3 text-sm text-[#72500a]">Location proof needs a place name and coordinates. Go back to the Quest step and use the location control.</p> : null}{checkpointsRequired ? <div className="mt-6 rounded-xl border border-line bg-background p-4"><div className="flex items-start justify-between gap-4"><div><h2 className="font-bold">Ordered checkpoints</h2><p className="mt-1 text-xs leading-5 text-muted">Participants must complete these in order. Private QR codes are created after the draft is saved.</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold">{checkpoints.length}/20</span></div><div className="mt-4 space-y-3">{checkpoints.map((checkpoint, index) => <div key={index} className="rounded-xl border border-line bg-white p-4"><div className="flex items-center justify-between gap-3"><span className="text-xs font-bold uppercase tracking-[0.14em] text-muted">Stop {index + 1}</span><button type="button" onClick={() => removeCheckpoint(index)} disabled={checkpoints.length === 1} aria-label={`Remove checkpoint ${index + 1}`} className="grid h-8 w-8 place-items-center rounded-full text-muted hover:bg-[#fff0ed] hover:text-[#8f2e1e] disabled:opacity-25"><Trash2 size={15} /></button></div><input value={checkpoint.title} onChange={(event) => updateCheckpoint(index, "title", event.target.value)} maxLength={100} className="mt-3 w-full rounded-xl border border-line bg-background px-4 py-3 text-sm outline-none focus:border-foreground" placeholder="Checkpoint title" /><textarea value={checkpoint.instructions} onChange={(event) => updateCheckpoint(index, "instructions", event.target.value)} maxLength={500} rows={2} className="mt-2 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 text-sm outline-none focus:border-foreground" placeholder="Where to find the code (optional)" /></div>)}</div><button type="button" onClick={() => setCheckpoints((current) => [...current, { title: "", instructions: "" }])} disabled={checkpoints.length >= 20} className="mt-3 flex items-center gap-2 rounded-full border border-dark/20 bg-white px-4 py-2 text-sm font-bold disabled:opacity-40"><Plus size={16} /> Add checkpoint</button>{!checkpointsReady ? <p className="mt-3 text-xs text-[#8f2e1e]">Give every checkpoint a title of at least two characters.</p> : null}</div> : null}</div>
             ) : null}
 
             {step === 3 ? (
@@ -229,12 +258,12 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 5 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ...(questType === "Explore" ? [["Location", locationReady ? locationName.trim() : "Not set"]] : []), ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ...(questType === "Explore" ? [["Location", locationReady ? locationName.trim() : "Not set"]] : []), ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ...(checkpointsRequired ? [["Checkpoints", `${checkpoints.length} in order`]] : []), ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
             ) : null}
 
             <div className="mt-9 flex items-center justify-between border-t border-line pt-5">
               <button disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))} className="flex items-center gap-2 rounded-full px-4 py-3 text-sm font-bold disabled:opacity-30"><ArrowLeft size={17} /> Back</button>
-              <button onClick={next} disabled={publishing || (step === 0 && !detailsValid) || (step === 2 && (proof.length === 0 || (locationRequired && !locationReady))) || (step === 3 && selectionMethod === "Best submission" && judgingCriteria.trim().length < 3) || (step === 5 && locationRequired && !locationReady) || Boolean(publishedQuest)} className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{publishing ? <><LoaderCircle size={17} className="animate-spin" /> Publishing…</> : step === 5 ? (rewardEnabled ? "Save and continue to funding" : "Publish quest") : "Continue"}{!publishing ? <ArrowRight size={17} /> : null}</button>
+              <button onClick={next} disabled={publishing || (step === 0 && !detailsValid) || (step === 2 && (proof.length === 0 || (locationRequired && !locationReady) || !checkpointsReady)) || (step === 3 && selectionMethod === "Best submission" && judgingCriteria.trim().length < 3) || (step === 5 && (locationRequired && !locationReady || !checkpointsReady)) || Boolean(publishedQuest)} className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{publishing ? <><LoaderCircle size={17} className="animate-spin" /> Publishing…</> : step === 5 ? (rewardEnabled ? "Save and continue to funding" : "Publish quest") : "Continue"}{!publishing ? <ArrowRight size={17} /> : null}</button>
             </div>
           </div>
         </section>

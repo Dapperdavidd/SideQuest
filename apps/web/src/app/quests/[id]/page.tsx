@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, CalendarDays, CheckCircle2, MapPin, Trophy, UsersRound } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { formatDeadline, formatReward, getQuest, getQuestSaved, getQuestWinners, questImageClass } from "@/lib/api/quests";
+import { formatDeadline, formatReward, getQuest, getQuestCheckpoints, getQuestSaved, getQuestWinners, questImageClass } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { JoinButton } from "./join-button";
@@ -11,6 +11,7 @@ import { SaveQuestButton } from "./save-quest-button";
 import { InvitationPanel } from "./invitation-panel";
 import { ReportContentButton } from "@/components/report-content-button";
 import { ShareQuestButton } from "./share-quest-button";
+import { CheckpointPanel } from "./checkpoint-panel";
 
 type QuestPageProps = {
   params: Promise<{ id: string }>;
@@ -28,10 +29,11 @@ async function QuestExperience({ params }: QuestPageProps) {
   const { id } = await params;
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  const [quest, viewer, winners] = await Promise.all([
+  const [quest, viewer, winners, checkpoints] = await Promise.all([
     getQuest(id, session?.access_token),
     getViewer(),
     getQuestWinners(id),
+    getQuestCheckpoints(id, session?.access_token),
   ]);
   if (!quest) notFound();
   const initiallySaved = session ? await getQuestSaved(id, session.access_token) : false;
@@ -67,6 +69,8 @@ async function QuestExperience({ params }: QuestPageProps) {
 
             {quest.judging_criteria ? <div className="mt-8 rounded-xl bg-background p-5"><h3 className="font-bold">Published judging criteria</h3><p className="mt-2 text-sm leading-6 text-muted">{quest.judging_criteria}</p></div> : null}
           </section>
+
+          {quest.proof_requirements.includes("QR_CHECKPOINT") ? <CheckpointPanel questId={quest.id} initialCheckpoints={checkpoints} isCreator={viewer?.id === quest.creator_id} joined={quest.viewer_joined} isOpen={isOpen} /> : null}
         </article>
 
         <aside>

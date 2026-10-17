@@ -742,6 +742,10 @@ pub async fn publish_quest(
           and creator_id = $2
           and status = 'DRAFT'
           and deadline > now()
+          and (
+            not ('QR_CHECKPOINT' = any(proof_requirements))
+            or exists(select 1 from public.quest_checkpoints c where c.quest_id = quests.id)
+          )
         returning status::text
         "#,
     )
@@ -752,8 +756,13 @@ pub async fn publish_quest(
     .map_err(|_| QuestError::Database)?;
 
     if result.is_none() {
-        let ownership = sqlx::query_as::<_, (Uuid, String, DateTime<Utc>)>(
-            "select creator_id, status::text, deadline from public.quests where id = $1",
+        let ownership = sqlx::query_as::<_, (Uuid, String, DateTime<Utc>, bool)>(
+            r#"
+            select creator_id, status::text, deadline,
+                   not ('QR_CHECKPOINT' = any(proof_requirements))
+                   or exists(select 1 from public.quest_checkpoints c where c.quest_id = quests.id)
+            from public.quests where id = $1
+            "#,
         )
         .bind(quest_id)
         .fetch_optional(&state.database)
@@ -762,8 +771,9 @@ pub async fn publish_quest(
 
         return match ownership {
             None => Err(QuestError::NotFound),
-            Some((creator_id, _, _)) if creator_id != user.id => Err(QuestError::NotCreator),
-            Some((_, _, deadline)) if deadline <= Utc::now() => Err(QuestError::InvalidDeadline),
+            Some((creator_id, _, _, _)) if creator_id != user.id => Err(QuestError::NotCreator),
+            Some((_, _, deadline, _)) if deadline <= Utc::now() => Err(QuestError::InvalidDeadline),
+            Some((_, _, _, false)) => Err(QuestError::InvalidQuest),
             Some(_) => Err(QuestError::NotOpen),
         };
     }

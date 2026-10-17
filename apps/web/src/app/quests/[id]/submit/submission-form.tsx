@@ -21,6 +21,7 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const manualProofRequirements = quest.proof_requirements.filter((proofType) => proofType !== "QR_CHECKPOINT");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,7 +38,7 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
       }
 
       const evidence: { proof_type: string; value: string }[] = [];
-      for (const proofType of quest.proof_requirements) {
+      for (const proofType of manualProofRequirements) {
         if (mediaProofs.has(proofType)) {
           const file = files[proofType];
           if (!file) throw new Error(`Choose a ${proofType.toLowerCase()} file.`);
@@ -89,8 +90,10 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
       <h1 className="mt-3 font-display text-3xl font-bold">Submit your proof</h1>
       <p className="mt-2 text-sm leading-6 text-muted">Once accepted, this consumes one of {quest.max_entries} entry slots and cannot be deleted.</p>
 
-      <div className="mt-7 space-y-5">
-        {quest.proof_requirements.map((proofType) => (
+      {quest.proof_requirements.includes("QR_CHECKPOINT") ? <div className="mt-6 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><Check size={18} className="mt-0.5 shrink-0" /><p className="text-sm leading-6"><strong>Checkpoint progress is verified automatically.</strong><br /><span className="text-muted">Complete every stop on the quest page before sending this entry.</span></p></div> : null}
+
+      <div className={manualProofRequirements.length ? "mt-7 space-y-5" : ""}>
+        {manualProofRequirements.map((proofType) => (
           <ProofField key={proofType} proofType={proofType} value={values[proofType] ?? ""} onValue={(value) => setValues((current) => ({ ...current, [proofType]: value }))} onFile={(file) => setFiles((current) => ({ ...current, [proofType]: file }))} />
         ))}
       </div>
@@ -120,6 +123,5 @@ function proofLabel(proofType: string) {
 function proofPlaceholder(proofType: string) {
   if (proofType === "LINK") return "https://example.com/your-proof";
   if (proofType === "LOCATION") return "Venue or precise location";
-  if (proofType === "QR_CHECKPOINT") return "Scanned checkpoint code";
   return "Add your proof";
 }

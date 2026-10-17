@@ -58,6 +58,8 @@ pub enum EntryAcceptanceError {
     InvalidEvidence,
     #[error("add a Nimiq testnet payout address before submitting to a rewarded quest")]
     PayoutDestinationRequired,
+    #[error("complete every quest checkpoint before submitting an entry")]
+    CheckpointsIncomplete,
     #[error("entry could not be accepted")]
     Database,
 }
@@ -72,6 +74,7 @@ struct QuestEntryGate {
     participant_joined: bool,
     reward_enabled: bool,
     payout_destination_address: Option<String>,
+    checkpoints_complete: bool,
 }
 
 fn validate_entry_gate(
@@ -93,6 +96,9 @@ fn validate_entry_gate(
     if gate.reward_enabled && gate.payout_destination_address.is_none() {
         return Err(EntryAcceptanceError::PayoutDestinationRequired);
     }
+    if !gate.checkpoints_complete {
+        return Err(EntryAcceptanceError::CheckpointsIncomplete);
+    }
     Ok(())
 }
 
@@ -104,7 +110,11 @@ fn validate_evidence(
         .caption
         .as_deref()
         .is_some_and(|caption| caption.chars().count() > 280)
-        || command.evidence.len() != requirements.len()
+        || command.evidence.len()
+            != requirements
+                .iter()
+                .filter(|requirement| requirement.as_str() != "QR_CHECKPOINT")
+                .count()
     {
         return Err(
             if command
@@ -119,7 +129,11 @@ fn validate_evidence(
         );
     }
 
-    let required: HashSet<&str> = requirements.iter().map(String::as_str).collect();
+    let required: HashSet<&str> = requirements
+        .iter()
+        .map(String::as_str)
+        .filter(|requirement| *requirement != "QR_CHECKPOINT")
+        .collect();
     let submitted: HashSet<&str> = command
         .evidence
         .iter()
@@ -179,7 +193,21 @@ pub async fn accept_entry(
             (
               select d.address from user_payout_destinations d
               where d.user_id = $2 and d.network = 'testnet'
-            ) as payout_destination_address
+            ) as payout_destination_address,
+            (
+              not ('QR_CHECKPOINT' = any(q.proof_requirements))
+              or (
+                exists(select 1 from quest_checkpoints c where c.quest_id = q.id)
+                and not exists(
+                  select 1 from quest_checkpoints c
+                  where c.quest_id = q.id
+                    and not exists(
+                      select 1 from checkpoint_progress progress
+                      where progress.checkpoint_id = c.id and progress.user_id = $2
+                    )
+                )
+              )
+            ) as checkpoints_complete
         from quests q
         where q.id = $1
         for update
@@ -216,6 +244,9 @@ pub async fn accept_entry(
             .map_err(|_| EntryAcceptanceError::Database)?,
         payout_destination_address: row
             .try_get("payout_destination_address")
+            .map_err(|_| EntryAcceptanceError::Database)?,
+        checkpoints_complete: row
+            .try_get("checkpoints_complete")
             .map_err(|_| EntryAcceptanceError::Database)?,
     };
     validate_entry_gate(&gate, now)?;
@@ -349,6 +380,7 @@ impl ResponseError for EntryError {
                 EntryAcceptanceError::InvalidCaption => "invalid_caption",
                 EntryAcceptanceError::InvalidEvidence => "invalid_evidence",
                 EntryAcceptanceError::PayoutDestinationRequired => "payout_destination_required",
+                EntryAcceptanceError::CheckpointsIncomplete => "checkpoints_incomplete",
                 EntryAcceptanceError::Database => "entry_service_unavailable",
             },
             "message": error.to_string(),
@@ -394,6 +426,7 @@ mod tests {
             participant_joined: true,
             reward_enabled: false,
             payout_destination_address: None,
+            checkpoints_complete: true,
         }
     }
 
@@ -481,6 +514,21 @@ mod tests {
     fn accepts_matching_photo_evidence_in_the_participants_folder() {
         let command = command("PHOTO", "proof.jpg");
         assert!(validate_evidence(&command, &["PHOTO".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn checkpoint_progress_replaces_manual_qr_evidence() {
+        let mut command = command("PHOTO", "proof.jpg");
+        command.evidence.clear();
+        assert!(validate_evidence(&command, &["QR_CHECKPOINT".to_string()]).is_ok());
+
+        let now = Utc::now();
+        let mut incomplete = gate("OPEN", now + Duration::hours(1), 5, 0);
+        incomplete.checkpoints_complete = false;
+        assert_eq!(
+            validate_entry_gate(&incomplete, now),
+            Err(EntryAcceptanceError::CheckpointsIncomplete)
+        );
     }
 
     #[test]

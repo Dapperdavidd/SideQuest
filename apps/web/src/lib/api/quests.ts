@@ -73,6 +73,24 @@ export type CreatorAnalytics = {
   rewards_paid_minor: number;
 };
 
+export type QuestCheckpoint = {
+  id: string;
+  quest_id: string;
+  position: number;
+  title: string;
+  instructions: string | null;
+  verification_code: string | null;
+  completed_at: string | null;
+};
+
+export type CheckpointCompletion = {
+  checkpoint_id: string;
+  completed_at: string;
+  completed_count: number;
+  total_count: number;
+  quest_complete: boolean;
+};
+
 export type ApiErrorBody = {
   code?: string;
   message?: string;
@@ -201,6 +219,15 @@ export async function getQuest(id: string, accessToken?: string): Promise<Quest 
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Unable to load this quest right now.");
   return response.json() as Promise<Quest>;
+}
+
+export async function getQuestCheckpoints(id: string, accessToken?: string): Promise<QuestCheckpoint[]> {
+  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(id)}/checkpoints`), {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    cache: "no-store",
+  });
+  if (!response.ok) return [];
+  return response.json() as Promise<QuestCheckpoint[]>;
 }
 
 export async function getQuestWinners(id: string): Promise<PublicWinner[]> {
