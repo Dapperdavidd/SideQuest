@@ -360,6 +360,33 @@ class QuestCheckpoint {
   );
 }
 
+class Organization {
+  const Organization({
+    required this.id,
+    required this.slug,
+    required this.displayName,
+    required this.description,
+    required this.websiteUrl,
+    required this.verificationStatus,
+  });
+
+  factory Organization.fromJson(Map<String, dynamic> json) => Organization(
+    id: json['id'] as String,
+    slug: json['slug'] as String,
+    displayName: json['display_name'] as String,
+    description: json['description'] as String?,
+    websiteUrl: json['website_url'] as String?,
+    verificationStatus: json['verification_status'] as String,
+  );
+
+  final String id;
+  final String slug;
+  final String displayName;
+  final String? description;
+  final String? websiteUrl;
+  final String verificationStatus;
+}
+
 class QuestInvitation {
   const QuestInvitation({
     required this.id,
@@ -536,6 +563,38 @@ class QuestRepository {
       '/quests/$id/join',
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
+  }
+
+  Future<Organization?> getMyOrganization(String accessToken) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/users/me/organization',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      return Organization.fromJson(response.data!);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<Organization> saveOrganization(
+    Map<String, dynamic> payload,
+    String accessToken, {
+    String? organizationId,
+  }) async {
+    final response = organizationId == null
+        ? await _dio.post<Map<String, dynamic>>(
+            '/organizations',
+            data: payload,
+            options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+          )
+        : await _dio.patch<Map<String, dynamic>>(
+            '/organizations/$organizationId',
+            data: payload,
+            options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+          );
+    return Organization.fromJson(response.data!);
   }
 
   Future<List<QuestCheckpoint>> listCheckpoints(String questId) async {
@@ -1320,6 +1379,13 @@ final creatorAnalyticsProvider = FutureProvider.autoDispose<CreatorAnalytics>((
   return ref
       .watch(questRepositoryProvider)
       .getCreatorAnalytics(session.accessToken);
+});
+final myOrganizationProvider = FutureProvider.autoDispose<Organization?>((ref) {
+  final session = currentSession;
+  if (session == null) return null;
+  return ref
+      .watch(questRepositoryProvider)
+      .getMyOrganization(session.accessToken);
 });
 final publicProfileProvider = FutureProvider.autoDispose
     .family<UserProfile, String>(
@@ -8355,6 +8421,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     else
                       _buildProfile(profile, session.user.email ?? ''),
                     const SizedBox(height: 28),
+                    const _BusinessProfileSection(),
+                    const SizedBox(height: 28),
                     _buildPayoutDestination(),
                     const SizedBox(height: 28),
                     OutlinedButton.icon(
@@ -8664,6 +8732,317 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ),
     ],
   );
+}
+
+class _BusinessProfileSection extends ConsumerStatefulWidget {
+  const _BusinessProfileSection();
+
+  @override
+  ConsumerState<_BusinessProfileSection> createState() =>
+      _BusinessProfileSectionState();
+}
+
+class _BusinessProfileSectionState
+    extends ConsumerState<_BusinessProfileSection> {
+  final nameController = TextEditingController();
+  final slugController = TextEditingController();
+  final descriptionController = TextEditingController();
+  final websiteController = TextEditingController();
+  String? loadedId;
+  bool editing = false;
+  bool saving = false;
+  String? errorMessage;
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    slugController.dispose();
+    descriptionController.dispose();
+    websiteController.dispose();
+    super.dispose();
+  }
+
+  void load(Organization? organization) {
+    final id = organization?.id ?? 'new';
+    if (loadedId == id) return;
+    loadedId = id;
+    editing = organization == null;
+    nameController.text = organization?.displayName ?? '';
+    slugController.text = organization?.slug ?? '';
+    descriptionController.text = organization?.description ?? '';
+    websiteController.text = organization?.websiteUrl ?? '';
+  }
+
+  Future<void> save(Organization? organization) async {
+    final session = currentSession;
+    if (session == null) return;
+    final slug = slugController.text.trim();
+    if (!RegExp(r'^[a-z0-9][a-z0-9-]{2,39}$').hasMatch(slug) ||
+        slug.endsWith('-')) {
+      setState(
+        () => errorMessage =
+            'Use 3–40 lowercase letters, numbers, or hyphens for the address.',
+      );
+      return;
+    }
+    setState(() {
+      saving = true;
+      errorMessage = null;
+    });
+    try {
+      await ref
+          .read(questRepositoryProvider)
+          .saveOrganization(
+            {
+              'slug': slug,
+              'display_name': nameController.text.trim(),
+              'description': descriptionController.text.trim().isEmpty
+                  ? null
+                  : descriptionController.text.trim(),
+              'website_url': websiteController.text.trim().isEmpty
+                  ? null
+                  : websiteController.text.trim(),
+              'logo_url': null,
+            },
+            session.accessToken,
+            organizationId: organization?.id,
+          );
+      loadedId = null;
+      ref.invalidate(myOrganizationProvider);
+      if (mounted) {
+        setState(() => editing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Business profile saved.')),
+        );
+      }
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      if (mounted) {
+        setState(() {
+          errorMessage = data is Map<String, dynamic>
+              ? data['message'] as String? ??
+                    'The business profile could not be saved.'
+              : 'The business profile could not be saved.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ref
+      .watch(myOrganizationProvider)
+      .when(
+        loading: () => const LinearProgressIndicator(color: accent),
+        error: (_, _) => _QuestFeedError(
+          onRetry: () => ref.invalidate(myOrganizationProvider),
+        ),
+        data: (organization) {
+          load(organization);
+          return Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: line),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: editing
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Business profile',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Represent a café, venue, brand, or community with this same account.',
+                        style: TextStyle(
+                          color: muted,
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: nameController,
+                        maxLength: 100,
+                        onChanged: (_) => setState(() => errorMessage = null),
+                        decoration: const InputDecoration(
+                          labelText: 'Business name',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: slugController,
+                        maxLength: 40,
+                        autocorrect: false,
+                        onChanged: (value) {
+                          final normalized = value
+                              .toLowerCase()
+                              .replaceAll(RegExp(r'[^a-z0-9-]'), '-')
+                              .replaceAll(RegExp(r'-+'), '-');
+                          if (normalized != value) {
+                            slugController.value = TextEditingValue(
+                              text: normalized,
+                              selection: TextSelection.collapsed(
+                                offset: normalized.length,
+                              ),
+                            );
+                          }
+                          setState(() => errorMessage = null);
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Profile address',
+                          prefixText: '/businesses/',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: descriptionController,
+                        maxLength: 500,
+                        minLines: 3,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: 'About the business',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: websiteController,
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Website (optional)',
+                          hintText: 'https://example.com',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          errorMessage!,
+                          style: const TextStyle(color: Color(0xFF8F2E1E)),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          if (organization != null) ...[
+                            OutlinedButton(
+                              onPressed: saving
+                                  ? null
+                                  : () => setState(() => editing = false),
+                              child: const Text('Cancel'),
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed:
+                                  saving ||
+                                      nameController.text.trim().length < 2 ||
+                                      slugController.text.trim().length < 3
+                                  ? null
+                                  : () => save(organization),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: ink,
+                                foregroundColor: Colors.white,
+                              ),
+                              icon: saving
+                                  ? const SizedBox.square(
+                                      dimension: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(Icons.business_outlined),
+                              label: Text(
+                                organization == null
+                                    ? 'Create profile'
+                                    : 'Save changes',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'New profiles remain private while verification is pending.',
+                        style: TextStyle(color: muted, fontSize: 11),
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const CircleAvatar(
+                            backgroundColor: Color(0xFFF1FFD0),
+                            foregroundColor: ink,
+                            child: Icon(Icons.business_outlined),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  organization!.displayName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  '/businesses/${organization.slug}',
+                                  style: const TextStyle(
+                                    color: muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Chip(
+                            label: Text(
+                              organization.verificationStatus.toLowerCase(),
+                            ),
+                            backgroundColor:
+                                organization.verificationStatus == 'VERIFIED'
+                                ? const Color(0xFFF1FFD0)
+                                : background,
+                            side: BorderSide.none,
+                          ),
+                        ],
+                      ),
+                      if (organization.description != null) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          organization.description!,
+                          style: const TextStyle(color: muted, height: 1.45),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      OutlinedButton.icon(
+                        onPressed: () => setState(() => editing = true),
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Edit business profile'),
+                      ),
+                    ],
+                  ),
+          );
+        },
+      );
 }
 
 class _ProfileAvatar extends StatelessWidget {

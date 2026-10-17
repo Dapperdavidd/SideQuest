@@ -74,6 +74,20 @@ export type CreatorAnalytics = {
   rewards_paid_minor: number;
 };
 
+export type Organization = {
+  id: string;
+  owner_id: string;
+  owner_username: string;
+  slug: string;
+  display_name: string;
+  description: string | null;
+  website_url: string | null;
+  logo_url: string | null;
+  verification_status: "PENDING" | "VERIFIED" | "REJECTED";
+  verified_at: string | null;
+  created_at: string;
+};
+
 export type QuestCheckpoint = {
   id: string;
   quest_id: string;
@@ -287,6 +301,26 @@ export async function getCreatorAnalytics(accessToken: string): Promise<CreatorA
   });
   if (!response.ok) throw new Error("Unable to load creator analytics right now.");
   return response.json() as Promise<CreatorAnalytics>;
+}
+
+export async function getMyOrganization(accessToken: string): Promise<Organization | null> {
+  const response = await fetch(apiUrl("/users/me/organization"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("Unable to load your business profile right now.");
+  return response.json() as Promise<Organization>;
+}
+
+export async function getOrganization(slug: string, accessToken?: string): Promise<Organization | null> {
+  const response = await fetch(apiUrl(`/organizations/${encodeURIComponent(slug)}`), {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    cache: "no-store",
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("Unable to load this business profile right now.");
+  return response.json() as Promise<Organization>;
 }
 
 export async function getFollowState(userId: string, accessToken: string): Promise<boolean> {
