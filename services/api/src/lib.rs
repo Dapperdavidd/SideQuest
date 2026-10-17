@@ -59,6 +59,7 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(profiles::get_me)
             .service(profiles::update_me)
             .service(profiles::get_profile)
+            .service(profiles::get_achievements)
             .service(profiles::get_follow_state)
             .service(profiles::follow_user)
             .service(profiles::unfollow_user)

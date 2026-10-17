@@ -331,6 +331,33 @@ class AppNotification {
   bool get unread => readAt == null;
 }
 
+class Achievement {
+  const Achievement({
+    required this.code,
+    required this.title,
+    required this.description,
+    required this.current,
+    required this.target,
+    required this.unlocked,
+  });
+
+  factory Achievement.fromJson(Map<String, dynamic> json) => Achievement(
+    code: json['code'] as String,
+    title: json['title'] as String,
+    description: json['description'] as String,
+    current: (json['current'] as num).toInt(),
+    target: (json['target'] as num).toInt(),
+    unlocked: json['unlocked'] as bool,
+  );
+
+  final String code;
+  final String title;
+  final String description;
+  final int current;
+  final int target;
+  final bool unlocked;
+}
+
 class QuestRepository {
   QuestRepository([Dio? dio])
     : _dio = dio ?? Dio(BaseOptions(baseUrl: apiBaseUrl));
@@ -488,6 +515,15 @@ class QuestRepository {
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
     return (response.data!['unread_count'] as num).toInt();
+  }
+
+  Future<List<Achievement>> listAchievements(String username) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/users/${Uri.encodeComponent(username)}/achievements',
+    );
+    return response.data!
+        .map((json) => Achievement.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
   }
 
   Future<void> markNotificationRead(
@@ -990,6 +1026,11 @@ final notificationUnreadCountProvider = FutureProvider.autoDispose<int>((ref) {
       .watch(questRepositoryProvider)
       .unreadNotificationCount(session.accessToken);
 });
+final achievementsProvider = FutureProvider.autoDispose
+    .family<List<Achievement>, String>(
+      (ref, username) =>
+          ref.watch(questRepositoryProvider).listAchievements(username),
+    );
 final questSavedProvider = FutureProvider.autoDispose.family<bool, String>((
   ref,
   questId,
@@ -6219,6 +6260,7 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
       }
       ref.invalidate(userFollowStateProvider(profile.id));
       ref.invalidate(publicProfileProvider(widget.username));
+      ref.invalidate(achievementsProvider(widget.username));
     } on DioException catch (error) {
       if (!mounted) return;
       final data = error.response?.data;
@@ -6266,6 +6308,7 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                   onRefresh: () async {
                     ref.invalidate(publicProfileProvider(widget.username));
                     ref.invalidate(userFollowStateProvider(profile.id));
+                    ref.invalidate(achievementsProvider(widget.username));
                     await ref.read(
                       publicProfileProvider(widget.username).future,
                     );
@@ -6390,6 +6433,12 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                           const SizedBox(width: 8),
                           const Expanded(child: SizedBox()),
                         ],
+                      ),
+                      const SizedBox(height: 28),
+                      _AchievementSection(
+                        achievements: ref.watch(
+                          achievementsProvider(widget.username),
+                        ),
                       ),
                     ],
                   ),
@@ -6748,6 +6797,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           '${profile.followingCount} following · ${profile.createdQuestsCount} created',
           style: const TextStyle(color: muted, fontSize: 12),
         ),
+        const SizedBox(height: 28),
+        _AchievementSection(
+          achievements: ref.watch(achievementsProvider(profile.username)),
+        ),
         const SizedBox(height: 22),
         FilledButton.icon(
           onPressed: () => context.push('/my-quests'),
@@ -6892,6 +6945,106 @@ class _ProfileAvatar extends StatelessWidget {
     ),
   );
 }
+
+class _AchievementSection extends StatelessWidget {
+  const _AchievementSection({required this.achievements});
+
+  final AsyncValue<List<Achievement>> achievements;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Achievements',
+        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 5),
+      const Text(
+        'Progress comes from official quest and social activity.',
+        style: TextStyle(color: muted, fontSize: 12),
+      ),
+      const SizedBox(height: 12),
+      achievements.when(
+        loading: () => const LinearProgressIndicator(color: accent),
+        error: (_, _) => const Text(
+          'Achievement progress is temporarily unavailable.',
+          style: TextStyle(color: muted),
+        ),
+        data: (items) => GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: items.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 1.05,
+          ),
+          itemBuilder: (context, index) {
+            final achievement = items[index];
+            final progress = achievement.target == 0
+                ? 0.0
+                : math.min(1.0, achievement.current / achievement.target);
+            return Opacity(
+              opacity: achievement.unlocked ? 1 : .62,
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: line),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: achievement.unlocked
+                          ? accent
+                          : const Color(0xFFECEEE8),
+                      foregroundColor: ink,
+                      child: Icon(_achievementIcon(achievement.code), size: 19),
+                    ),
+                    const Spacer(),
+                    Text(
+                      achievement.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 5),
+                    LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 5,
+                      color: accent,
+                      backgroundColor: line,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      achievement.unlocked
+                          ? 'Unlocked'
+                          : '${achievement.current}/${achievement.target}',
+                      style: const TextStyle(color: muted, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ],
+  );
+}
+
+IconData _achievementIcon(String code) => switch (code) {
+  'FIRST_QUEST' => Icons.flag_rounded,
+  'QUEST_MAKER' => Icons.add_task_rounded,
+  'COMMUNITY_BUILDER' => Icons.groups_rounded,
+  _ => Icons.emoji_events_rounded,
+};
 
 class _ProfileStat extends StatelessWidget {
   const _ProfileStat({required this.value, required this.label});

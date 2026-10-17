@@ -52,6 +52,15 @@ export type AppNotification = {
   created_at: string;
 };
 
+export type Achievement = {
+  code: "FIRST_QUEST" | "QUEST_MAKER" | "CHAMPION" | "COMMUNITY_BUILDER";
+  title: string;
+  description: string;
+  current: number;
+  target: number;
+  unlocked: boolean;
+};
+
 export type ApiErrorBody = {
   code?: string;
   message?: string;
@@ -215,6 +224,12 @@ export async function getPublicProfile(username: string): Promise<PublicProfile 
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Unable to load this profile right now.");
   return response.json() as Promise<PublicProfile>;
+}
+
+export async function getAchievements(username: string): Promise<Achievement[]> {
+  const response = await fetch(apiUrl(`/users/${encodeURIComponent(username)}/achievements`), { cache: "no-store" });
+  if (!response.ok) return [];
+  return response.json() as Promise<Achievement[]>;
 }
 
 export async function getFollowState(userId: string, accessToken: string): Promise<boolean> {

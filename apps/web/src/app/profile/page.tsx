@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, Award, Compass, LogOut, Sparkles, Trophy, WalletCards } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { getPublicProfile } from "@/lib/api/quests";
+import { AchievementGrid } from "@/components/achievement-grid";
+import { getAchievements, getPublicProfile } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { signOut } from "./actions";
 import { PayoutDestinationForm } from "./payout-destination-form";
@@ -20,7 +21,10 @@ export default function ProfilePage() {
 async function ProfileContent() {
   const viewer = await getViewer();
   if (!viewer) redirect("/auth");
-  const stats = await getPublicProfile(viewer.username).catch(() => null);
+  const [stats, achievements] = await Promise.all([
+    getPublicProfile(viewer.username).catch(() => null),
+    getAchievements(viewer.username).catch(() => []),
+  ]);
 
   const firstName = viewer.displayName.split(/\s+/)[0] || "Explorer";
   const initial = firstName.charAt(0).toUpperCase();
@@ -56,6 +60,12 @@ async function ProfileContent() {
           {[{ icon: Trophy, value: stats?.completed_quests_count ?? 0, label: "Completed" }, { icon: Compass, value: stats?.created_quests_count ?? 0, label: "Created" }, { icon: Award, value: stats?.wins_count ?? 0, label: "Wins" }].map(({ icon: Icon, value, label }) => (
             <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"><Icon size={19} className="text-accent" /><strong className="mt-5 block text-3xl">{value}</strong><span className="mt-1 block text-sm text-white/45">{label}</span></div>
           ))}
+        </section>
+
+        <section className="px-5 pb-8 sm:px-10">
+          <h2 className="font-display text-xl font-bold">Achievements</h2>
+          <p className="mt-1 text-sm text-white/45">Unlocked only by official SideQuest activity.</p>
+          <div className="mt-4"><AchievementGrid achievements={achievements} dark /></div>
         </section>
 
         <section className="px-5 pb-10 sm:px-10">

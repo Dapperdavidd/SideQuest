@@ -31,6 +31,60 @@ pub struct FollowState {
     following: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Achievement {
+    code: &'static str,
+    title: &'static str,
+    description: &'static str,
+    current: i64,
+    target: i64,
+    unlocked: bool,
+}
+
+fn derive_achievements(profile: &Profile) -> Vec<Achievement> {
+    let definitions = [
+        (
+            "FIRST_QUEST",
+            "First Quest",
+            "Complete your first finalized quest.",
+            profile.completed_quests_count,
+            1,
+        ),
+        (
+            "QUEST_MAKER",
+            "Quest Maker",
+            "Create three quests for the community.",
+            profile.created_quests_count,
+            3,
+        ),
+        (
+            "CHAMPION",
+            "Champion",
+            "Earn an official quest win.",
+            profile.wins_count,
+            1,
+        ),
+        (
+            "COMMUNITY_BUILDER",
+            "Community Builder",
+            "Reach ten followers.",
+            profile.followers_count,
+            10,
+        ),
+    ];
+    definitions
+        .into_iter()
+        .map(|(code, title, description, current, target)| Achievement {
+            code,
+            title,
+            description,
+            current,
+            target,
+            unlocked: current >= target,
+        })
+        .collect()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateProfile {
     username: Option<String>,
@@ -171,6 +225,15 @@ pub async fn get_profile(
 ) -> Result<web::Json<Profile>, ProfileError> {
     let profile = find_by_username(&state, &username.into_inner()).await?;
     Ok(web::Json(profile))
+}
+
+#[get("/users/{username}/achievements")]
+pub async fn get_achievements(
+    state: web::Data<AppState>,
+    username: web::Path<String>,
+) -> Result<web::Json<Vec<Achievement>>, ProfileError> {
+    let profile = find_by_username(&state, &username.into_inner()).await?;
+    Ok(web::Json(derive_achievements(&profile)))
 }
 
 #[get("/users/{user_id}/follow-state")]
@@ -367,5 +430,29 @@ mod tests {
             avatar_url: None,
         };
         assert!(matches!(update.validate(), Err(ProfileError::InvalidBio)));
+    }
+
+    #[test]
+    fn achievements_are_derived_from_authoritative_counts() {
+        let now = Utc::now();
+        let profile = Profile {
+            id: Uuid::new_v4(),
+            username: "hannah".to_string(),
+            display_name: "Hannah".to_string(),
+            bio: None,
+            avatar_url: None,
+            created_at: now,
+            updated_at: now,
+            followers_count: 9,
+            following_count: 2,
+            created_quests_count: 3,
+            completed_quests_count: 1,
+            wins_count: 0,
+        };
+        let achievements = derive_achievements(&profile);
+        assert!(achievements[0].unlocked);
+        assert!(achievements[1].unlocked);
+        assert!(!achievements[2].unlocked);
+        assert!(!achievements[3].unlocked);
     }
 }
