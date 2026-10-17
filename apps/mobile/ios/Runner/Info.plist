@@ -38,7 +38,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>SideQuest uses the camera when you capture photo or video proof for a quest entry.</string>
+	<string>SideQuest uses the camera when you scan a quest checkpoint or capture photo and video proof.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>SideQuest uses your location only when you choose nearby discovery or add a place to an Explore quest.</string>
 	<key>NSMicrophoneUsageDescription</key>

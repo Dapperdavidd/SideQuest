@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -306,6 +308,49 @@ class Quest {
   }
 }
 
+class QuestCheckpoint {
+  const QuestCheckpoint({
+    required this.id,
+    required this.questId,
+    required this.position,
+    required this.title,
+    required this.instructions,
+    required this.verificationCode,
+    required this.completedAt,
+  });
+
+  factory QuestCheckpoint.fromJson(Map<String, dynamic> json) =>
+      QuestCheckpoint(
+        id: json['id'] as String,
+        questId: json['quest_id'] as String,
+        position: (json['position'] as num).toInt(),
+        title: json['title'] as String,
+        instructions: json['instructions'] as String?,
+        verificationCode: json['verification_code'] as String?,
+        completedAt: json['completed_at'] == null
+            ? null
+            : DateTime.parse(json['completed_at'] as String).toLocal(),
+      );
+
+  final String id;
+  final String questId;
+  final int position;
+  final String title;
+  final String? instructions;
+  final String? verificationCode;
+  final DateTime? completedAt;
+
+  QuestCheckpoint completed(DateTime timestamp) => QuestCheckpoint(
+    id: id,
+    questId: questId,
+    position: position,
+    title: title,
+    instructions: instructions,
+    verificationCode: verificationCode,
+    completedAt: timestamp,
+  );
+}
+
 class QuestInvitation {
   const QuestInvitation({
     required this.id,
@@ -482,6 +527,49 @@ class QuestRepository {
       '/quests/$id/join',
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
+  }
+
+  Future<List<QuestCheckpoint>> listCheckpoints(String questId) async {
+    final session = currentSession;
+    final response = await _dio.get<List<dynamic>>(
+      '/quests/$questId/checkpoints',
+      options: session == null
+          ? null
+          : Options(
+              headers: {'Authorization': 'Bearer ${session.accessToken}'},
+            ),
+    );
+    return response.data!
+        .map((json) => QuestCheckpoint.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<QuestCheckpoint> createCheckpoint(
+    String questId,
+    String title,
+    String? instructions,
+    String accessToken,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests/$questId/checkpoints',
+      data: {'title': title, 'instructions': instructions},
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return QuestCheckpoint.fromJson(response.data!);
+  }
+
+  Future<Map<String, dynamic>> completeCheckpoint(
+    String questId,
+    String checkpointId,
+    String verificationCode,
+    String accessToken,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests/$questId/checkpoints/$checkpointId/complete',
+      data: {'verification_code': verificationCode},
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!;
   }
 
   Future<void> closeQuest(String id, String accessToken) async {
@@ -1151,6 +1239,10 @@ final nearbyQuestsProvider = FutureProvider.autoDispose
 final questProvider = FutureProvider.autoDispose.family<Quest, String>(
   (ref, id) => ref.watch(questRepositoryProvider).getQuest(id),
 );
+final questCheckpointsProvider = FutureProvider.autoDispose
+    .family<List<QuestCheckpoint>, String>(
+      (ref, id) => ref.watch(questRepositoryProvider).listCheckpoints(id),
+    );
 final questWinnersProvider = FutureProvider.autoDispose
     .family<List<PublicWinner>, String>(
       (ref, id) => ref.watch(questRepositoryProvider).listQuestWinners(id),
@@ -2596,6 +2688,10 @@ class _QuestDetail extends ConsumerWidget {
                       )
                       .toList(growable: false),
                 ),
+                if (quest.proofRequirements.contains('QR_CHECKPOINT')) ...[
+                  const SizedBox(height: 24),
+                  QuestCheckpointSection(quest: quest, isCreator: isCreator),
+                ],
                 if (!isCreator) ...[
                   const SizedBox(height: 24),
                   Align(
@@ -2661,6 +2757,401 @@ class _QuestDetail extends ConsumerWidget {
   }
 }
 
+class QuestCheckpointSection extends ConsumerStatefulWidget {
+  const QuestCheckpointSection({
+    required this.quest,
+    required this.isCreator,
+    super.key,
+  });
+
+  final Quest quest;
+  final bool isCreator;
+
+  @override
+  ConsumerState<QuestCheckpointSection> createState() =>
+      _QuestCheckpointSectionState();
+}
+
+class _QuestCheckpointSectionState
+    extends ConsumerState<QuestCheckpointSection> {
+  final codeController = TextEditingController();
+  bool working = false;
+  String? message;
+
+  @override
+  void dispose() {
+    codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> scanCode() async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _CheckpointScannerScreen()),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        codeController.text = result;
+        message = null;
+      });
+    }
+  }
+
+  Future<void> complete(QuestCheckpoint checkpoint) async {
+    final session = currentSession;
+    if (session == null) {
+      context.push(
+        '/auth?next=${Uri.encodeComponent('/quests/${widget.quest.id}')}',
+      );
+      return;
+    }
+    final code = codeController.text.trim();
+    if (code.isEmpty) return;
+    setState(() {
+      working = true;
+      message = null;
+    });
+    try {
+      final result = await ref
+          .read(questRepositoryProvider)
+          .completeCheckpoint(
+            widget.quest.id,
+            checkpoint.id,
+            code,
+            session.accessToken,
+          );
+      codeController.clear();
+      ref.invalidate(questCheckpointsProvider(widget.quest.id));
+      if (mounted) {
+        setState(() {
+          message = result['quest_complete'] == true
+              ? 'Every checkpoint is complete.'
+              : 'Checkpoint recorded. The next stop is unlocked.';
+        });
+      }
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      if (mounted) {
+        setState(() {
+          message = data is Map<String, dynamic>
+              ? data['message'] as String? ?? 'This code could not be verified.'
+              : 'This code could not be verified.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final checkpoints = ref.watch(questCheckpointsProvider(widget.quest.id));
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: line),
+      ),
+      child: checkpoints.when(
+        loading: () => const Center(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: CircularProgressIndicator(color: ink),
+          ),
+        ),
+        error: (_, _) => TextButton.icon(
+          onPressed: () =>
+              ref.invalidate(questCheckpointsProvider(widget.quest.id)),
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Retry checkpoints'),
+        ),
+        data: (items) {
+          if (items.isEmpty) {
+            return const Text('No checkpoints are available for this quest.');
+          }
+          final completed = items
+              .where((item) => item.completedAt != null)
+              .length;
+          final next = items.cast<QuestCheckpoint?>().firstWhere(
+            (item) => item?.completedAt == null,
+            orElse: () => null,
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.qr_code_2_rounded),
+                  const SizedBox(width: 9),
+                  const Expanded(
+                    child: Text(
+                      'Quest checkpoints',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    widget.isCreator
+                        ? '${items.length} codes'
+                        : '$completed/${items.length}',
+                    style: const TextStyle(
+                      color: muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.isCreator
+                    ? 'Place each private QR code at its matching real-world stop.'
+                    : 'Visit each stop and scan its QR in order.',
+                style: const TextStyle(color: muted, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              for (final checkpoint in items) ...[
+                _MobileCheckpointCard(
+                  checkpoint: checkpoint,
+                  isCreator: widget.isCreator,
+                  current: checkpoint.id == next?.id,
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (!widget.isCreator && !widget.quest.viewerJoined)
+                const _CheckpointNotice(
+                  text: 'Join this quest before recording checkpoint progress.',
+                )
+              else if (!widget.isCreator && widget.quest.status != 'OPEN')
+                const _CheckpointNotice(
+                  text: 'Checkpoint progress is closed for this quest.',
+                )
+              else if (!widget.isCreator && next != null) ...[
+                const SizedBox(height: 4),
+                TextField(
+                  controller: codeController,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    labelText: 'Code for stop ${next.position}',
+                    hintText: 'Scan or paste the checkpoint code',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      tooltip: 'Scan QR code',
+                      onPressed: working ? null : scanCode,
+                      icon: const Icon(Icons.qr_code_scanner_rounded),
+                    ),
+                  ),
+                  onChanged: (_) => setState(() => message = null),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: working || codeController.text.trim().isEmpty
+                      ? null
+                      : () => complete(next),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: ink,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(50),
+                  ),
+                  icon: working
+                      ? const SizedBox.square(
+                          dimension: 17,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.verified_outlined),
+                  label: const Text('Record checkpoint'),
+                ),
+              ] else if (!widget.isCreator && next == null)
+                const _CheckpointNotice(
+                  text: 'All checkpoints completed.',
+                  complete: true,
+                ),
+              if (message != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  message!,
+                  style: const TextStyle(color: muted, height: 1.4),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MobileCheckpointCard extends StatelessWidget {
+  const _MobileCheckpointCard({
+    required this.checkpoint,
+    required this.isCreator,
+    required this.current,
+  });
+
+  final QuestCheckpoint checkpoint;
+  final bool isCreator;
+  final bool current;
+
+  @override
+  Widget build(BuildContext context) {
+    final complete = checkpoint.completedAt != null;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: complete ? const Color(0xFFF2FFD0) : background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: current ? ink : line),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: complete
+                ? accent
+                : current
+                ? ink
+                : Colors.white,
+            foregroundColor: complete || !current ? ink : Colors.white,
+            child: complete
+                ? const Icon(Icons.check_rounded, size: 17)
+                : Text(
+                    '${checkpoint.position}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  checkpoint.title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                if (checkpoint.instructions != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    checkpoint.instructions!,
+                    style: const TextStyle(color: muted, height: 1.4),
+                  ),
+                ],
+                if (!isCreator) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    complete
+                        ? 'COMPLETED'
+                        : current
+                        ? 'READY TO SCAN'
+                        : 'LOCKED',
+                    style: const TextStyle(
+                      color: muted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .8,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (isCreator && checkpoint.verificationCode != null)
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(5),
+              child: QrImageView(
+                data: checkpoint.verificationCode!,
+                size: 92,
+                padding: EdgeInsets.zero,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CheckpointNotice extends StatelessWidget {
+  const _CheckpointNotice({required this.text, this.complete = false});
+  final String text;
+  final bool complete;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(13),
+    decoration: BoxDecoration(
+      color: complete ? const Color(0xFFF2FFD0) : const Color(0xFFFFF7DF),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+  );
+}
+
+class _CheckpointScannerScreen extends StatefulWidget {
+  const _CheckpointScannerScreen();
+
+  @override
+  State<_CheckpointScannerScreen> createState() =>
+      _CheckpointScannerScreenState();
+}
+
+class _CheckpointScannerScreenState extends State<_CheckpointScannerScreen> {
+  bool found = false;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.black,
+    appBar: AppBar(
+      title: const Text('Scan checkpoint'),
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+    ),
+    body: Stack(
+      fit: StackFit.expand,
+      children: [
+        MobileScanner(
+          onDetect: (capture) {
+            if (found) return;
+            final value = capture.barcodes
+                .map((barcode) => barcode.rawValue)
+                .whereType<String>()
+                .firstOrNull;
+            if (value == null || value.isEmpty) return;
+            found = true;
+            Navigator.pop(context, value);
+          },
+        ),
+        Center(
+          child: Container(
+            width: 250,
+            height: 250,
+            decoration: BoxDecoration(
+              border: Border.all(color: accent, width: 3),
+              borderRadius: BorderRadius.circular(24),
+            ),
+          ),
+        ),
+        const Positioned(
+          left: 28,
+          right: 28,
+          bottom: 48,
+          child: Text(
+            'Point the camera at the SideQuest checkpoint code.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class JoinQuestButton extends ConsumerStatefulWidget {
   const JoinQuestButton({
     required this.questId,
@@ -2698,6 +3189,8 @@ class _JoinQuestButtonState extends ConsumerState<JoinQuestButton> {
           .read(questRepositoryProvider)
           .joinQuest(widget.questId, session.accessToken);
       setState(() => joined = true);
+      ref.invalidate(questProvider(widget.questId));
+      ref.invalidate(questCheckpointsProvider(widget.questId));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Quest joined successfully.')),
@@ -3601,12 +4094,14 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
     if (source != null) await pickMedia(proof, source);
   }
 
-  bool readyToSubmit(Quest quest) => quest.proofRequirements.every((proof) {
-    if (proof == 'PHOTO' || proof == 'VIDEO') {
-      return mediaFiles.containsKey(proof);
-    }
-    return controllerFor(proof).text.trim().isNotEmpty;
-  });
+  bool readyToSubmit(Quest quest) => quest.proofRequirements
+      .where((proof) => proof != 'QR_CHECKPOINT')
+      .every((proof) {
+        if (proof == 'PHOTO' || proof == 'VIDEO') {
+          return mediaFiles.containsKey(proof);
+        }
+        return controllerFor(proof).text.trim().isNotEmpty;
+      });
 
   Future<void> submit(Quest quest) async {
     final session = currentSession;
@@ -3630,7 +4125,9 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
     final uploadedPaths = <String>[];
     try {
       final evidence = <Map<String, String>>[];
-      for (final proof in quest.proofRequirements) {
+      for (final proof in quest.proofRequirements.where(
+        (proof) => proof != 'QR_CHECKPOINT',
+      )) {
         if (proof == 'PHOTO' || proof == 'VIDEO') {
           final file = mediaFiles[proof]!;
           final extension = file.name.contains('.')
@@ -3849,8 +4346,17 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
                 'Every requirement must be included. Official entries cannot be edited or deleted.',
                 style: TextStyle(color: muted, height: 1.45),
               ),
+              if (quest.proofRequirements.contains('QR_CHECKPOINT')) ...[
+                const SizedBox(height: 14),
+                const _CheckpointNotice(
+                  text: 'Checkpoint progress is verified automatically. Complete every stop on the quest page first.',
+                  complete: true,
+                ),
+              ],
               const SizedBox(height: 18),
-              for (final proof in quest.proofRequirements) ...[
+              for (final proof in quest.proofRequirements.where(
+                (proof) => proof != 'QR_CHECKPOINT',
+              )) ...[
                 _EvidenceInput(
                   proof: proof,
                   controller: proof == 'PHOTO' || proof == 'VIDEO'
@@ -4854,6 +5360,20 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 }
 
+class _CheckpointDraft {
+  _CheckpointDraft()
+    : title = TextEditingController(),
+      instructions = TextEditingController();
+
+  final TextEditingController title;
+  final TextEditingController instructions;
+
+  void dispose() {
+    title.dispose();
+    instructions.dispose();
+  }
+}
+
 class CreateQuestScreen extends ConsumerStatefulWidget {
   const CreateQuestScreen({super.key});
 
@@ -4883,6 +5403,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   XFile? coverFile;
   Position? questPosition;
   bool locatingQuest = false;
+  final checkpointDrafts = <_CheckpointDraft>[_CheckpointDraft()];
 
   @override
   void dispose() {
@@ -4891,6 +5412,9 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     criteriaController.dispose();
     rewardController.dispose();
     locationController.dispose();
+    for (final checkpoint in checkpointDrafts) {
+      checkpoint.dispose();
+    }
     super.dispose();
   }
 
@@ -4901,7 +5425,8 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           deadline.isAfter(DateTime.now()),
     1 =>
       proofRequirements.isNotEmpty &&
-          (!proofRequirements.contains('LOCATION') || locationReady),
+          (!proofRequirements.contains('LOCATION') || locationReady) &&
+          (!proofRequirements.contains('QR_CHECKPOINT') || checkpointsReady),
     2 =>
       selectionMethod == 'FIRST_VALID' ||
           criteriaController.text.trim().length >= 3,
@@ -4910,6 +5435,15 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
 
   bool get locationReady =>
       locationController.text.trim().length >= 2 && questPosition != null;
+
+  bool get checkpointsReady =>
+      checkpointDrafts.isNotEmpty &&
+      checkpointDrafts.every(
+        (checkpoint) =>
+            checkpoint.title.text.trim().length >= 2 &&
+            (checkpoint.instructions.text.trim().isEmpty ||
+                checkpoint.instructions.text.trim().length >= 2),
+      );
 
   Future<void> chooseDeadline() async {
     final date = await showDatePicker(
@@ -5045,6 +5579,18 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'deadline': deadline.toUtc().toIso8601String(),
       }, session.accessToken);
       draftCreated = true;
+      if (proofRequirements.contains('QR_CHECKPOINT')) {
+        for (final checkpoint in checkpointDrafts) {
+          await repository.createCheckpoint(
+            created.id,
+            checkpoint.title.text.trim(),
+            checkpoint.instructions.text.trim().isEmpty
+                ? null
+                : checkpoint.instructions.text.trim(),
+            session.accessToken,
+          );
+        }
+      }
       final published = await repository.publishQuest(
         created.id,
         session.accessToken,
@@ -5550,6 +6096,115 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             ),
           ),
         ],
+        if (proofRequirements.contains('QR_CHECKPOINT')) ...[
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ordered checkpoints',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Participants unlock these in order.',
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '${checkpointDrafts.length}/20',
+                style: const TextStyle(
+                  color: muted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (var index = 0; index < checkpointDrafts.length; index++) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: line),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'STOP ${index + 1}',
+                        style: const TextStyle(
+                          color: muted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Remove checkpoint',
+                        onPressed: checkpointDrafts.length == 1
+                            ? null
+                            : () => setState(() {
+                                final removed = checkpointDrafts.removeAt(
+                                  index,
+                                );
+                                removed.dispose();
+                              }),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                      ),
+                    ],
+                  ),
+                  TextField(
+                    controller: checkpointDrafts[index].title,
+                    maxLength: 100,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Checkpoint title',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: checkpointDrafts[index].instructions,
+                    maxLength: 500,
+                    minLines: 2,
+                    maxLines: 3,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Where to find the code (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          OutlinedButton.icon(
+            onPressed: checkpointDrafts.length >= 20
+                ? null
+                : () =>
+                      setState(() => checkpointDrafts.add(_CheckpointDraft())),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Add checkpoint'),
+          ),
+          if (!checkpointsReady) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Give every checkpoint a title of at least two characters.',
+              style: TextStyle(color: Color(0xFF8F2E1E), fontSize: 12),
+            ),
+          ],
+        ],
       ],
     );
   }
@@ -5660,6 +6315,8 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             .map((value) => value.replaceAll('_', ' ').toLowerCase())
             .join(', '),
       ),
+      if (proofRequirements.contains('QR_CHECKPOINT'))
+        ('Checkpoints', '${checkpointDrafts.length} in order'),
       (
         'Reward',
         rewardEnabled
