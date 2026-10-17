@@ -4,7 +4,7 @@ use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use api::{
     AppState, PaymentConfig, PayoutSignerConfig, auth::AuthVerifier, configure_routes,
-    payments::run_payout_worker,
+    payments::run_payout_worker, quests::run_deadline_worker,
 };
 use sqlx::postgres::PgPoolOptions;
 
@@ -58,6 +58,8 @@ async fn main() -> io::Result<()> {
     };
     let payout_worker_state = state.clone();
     actix_web::rt::spawn(async move { run_payout_worker(payout_worker_state).await });
+    let deadline_worker_state = state.clone();
+    actix_web::rt::spawn(async move { run_deadline_worker(deadline_worker_state).await });
 
     tracing::info!(%host, %port, "starting SideQuest API");
 

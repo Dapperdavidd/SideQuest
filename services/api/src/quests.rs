@@ -4,10 +4,39 @@ use actix_web::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::time::Duration as StdDuration;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{AppState, auth::AuthError};
+
+pub async fn close_expired_quests_once(state: &AppState) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        r#"
+        update public.quests
+        set status = 'CLOSED_FOR_REVIEW',
+            closed_at = coalesce(closed_at, now()),
+            updated_at = now()
+        where status = 'OPEN'
+          and deadline <= now()
+        "#,
+    )
+    .execute(&state.database)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+pub async fn run_deadline_worker(state: AppState) {
+    tracing::info!("quest deadline worker enabled");
+    loop {
+        match close_expired_quests_once(&state).await {
+            Ok(closed) if closed > 0 => tracing::info!(closed, "closed expired quests for review"),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "quest deadline sweep failed"),
+        }
+        actix_web::rt::time::sleep(StdDuration::from_secs(15)).await;
+    }
+}
 
 const ALLOWED_PROOF_REQUIREMENTS: [&str; 6] = [
     "PHOTO",
