@@ -129,6 +129,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/create',
         builder: (context, state) => const CreateQuestScreen(),
       ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationsScreen(),
+      ),
     ],
   );
 });
@@ -292,6 +296,41 @@ class QuestInvitation {
       useCount < maxUses;
 }
 
+class AppNotification {
+  const AppNotification({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.body,
+    required this.href,
+    required this.readAt,
+    required this.createdAt,
+  });
+
+  factory AppNotification.fromJson(Map<String, dynamic> json) =>
+      AppNotification(
+        id: json['id'] as String,
+        kind: json['kind'] as String,
+        title: json['title'] as String,
+        body: json['body'] as String,
+        href: json['href'] as String,
+        readAt: json['read_at'] == null
+            ? null
+            : DateTime.parse(json['read_at'] as String).toLocal(),
+        createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+      );
+
+  final String id;
+  final String kind;
+  final String title;
+  final String body;
+  final String href;
+  final DateTime? readAt;
+  final DateTime createdAt;
+
+  bool get unread => readAt == null;
+}
+
 class QuestRepository {
   QuestRepository([Dio? dio])
     : _dio = dio ?? Dio(BaseOptions(baseUrl: apiBaseUrl));
@@ -431,6 +470,41 @@ class QuestRepository {
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
     return response.data!['quest_id'] as String;
+  }
+
+  Future<List<AppNotification>> listNotifications(String accessToken) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/users/me/notifications',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!
+        .map((json) => AppNotification.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<int> unreadNotificationCount(String accessToken) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/users/me/notifications/unread-count',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return (response.data!['unread_count'] as num).toInt();
+  }
+
+  Future<void> markNotificationRead(
+    String notificationId,
+    String accessToken,
+  ) async {
+    await _dio.post<void>(
+      '/users/me/notifications/$notificationId/read',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
+  Future<void> markAllNotificationsRead(String accessToken) async {
+    await _dio.post<void>(
+      '/users/me/notifications/read-all',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
   }
 
   Future<Quest> createQuest(
@@ -900,6 +974,22 @@ final savedQuestsProvider = FutureProvider.autoDispose<List<MyQuest>>((ref) {
       .watch(questRepositoryProvider)
       .listSavedQuests(session.accessToken);
 });
+final notificationsProvider = FutureProvider.autoDispose<List<AppNotification>>(
+  (ref) {
+    final session = currentSession;
+    if (session == null) return const [];
+    return ref
+        .watch(questRepositoryProvider)
+        .listNotifications(session.accessToken);
+  },
+);
+final notificationUnreadCountProvider = FutureProvider.autoDispose<int>((ref) {
+  final session = currentSession;
+  if (session == null) return 0;
+  return ref
+      .watch(questRepositoryProvider)
+      .unreadNotificationCount(session.accessToken);
+});
 final questSavedProvider = FutureProvider.autoDispose.family<bool, String>((
   ref,
   questId,
@@ -1309,6 +1399,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final asyncQuests = ref.watch(questsProvider);
     ref.watch(authStateProvider);
     final session = currentSession;
+    final unreadNotifications = session == null
+        ? 0
+        : ref.watch(notificationUnreadCountProvider).asData?.value ?? 0;
     final metadata = session?.user.userMetadata ?? const <String, dynamic>{};
     final displayName =
         (metadata['full_name'] as String?) ??
@@ -1344,9 +1437,19 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       ),
                     ),
                     const Spacer(),
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.notifications_none_rounded),
+                    Badge.count(
+                      count: unreadNotifications,
+                      isLabelVisible: unreadNotifications > 0,
+                      backgroundColor: accent,
+                      textColor: ink,
+                      child: IconButton(
+                        onPressed: () => context.push(
+                          session == null
+                              ? '/auth?next=/notifications'
+                              : '/notifications',
+                        ),
+                        icon: const Icon(Icons.notifications_none_rounded),
+                      ),
                     ),
                     InkWell(
                       onTap: () => context.push(
@@ -2620,6 +2723,262 @@ class _QuestInvitationsScreenState
       ),
     ),
   );
+}
+
+class NotificationsScreen extends ConsumerStatefulWidget {
+  const NotificationsScreen({super.key});
+
+  @override
+  ConsumerState<NotificationsScreen> createState() =>
+      _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
+  String? working;
+
+  Future<void> open(AppNotification notification) async {
+    final session = currentSession;
+    if (session == null) {
+      context.go('/auth?next=/notifications');
+      return;
+    }
+    setState(() => working = notification.id);
+    try {
+      if (notification.unread) {
+        await ref
+            .read(questRepositoryProvider)
+            .markNotificationRead(notification.id, session.accessToken);
+      }
+      ref.invalidate(notificationsProvider);
+      ref.invalidate(notificationUnreadCountProvider);
+      if (mounted) context.push(notification.href);
+    } on DioException catch (error) {
+      if (!mounted) return;
+      final body = error.response?.data;
+      final message = body is Map<String, dynamic>
+          ? body['message'] as String? ?? 'Unable to open this notification.'
+          : 'Unable to open this notification.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => working = null);
+    }
+  }
+
+  Future<void> markAllRead() async {
+    final session = currentSession;
+    if (session == null) return;
+    setState(() => working = 'all');
+    try {
+      await ref
+          .read(questRepositoryProvider)
+          .markAllNotificationsRead(session.accessToken);
+      ref.invalidate(notificationsProvider);
+      ref.invalidate(notificationUnreadCountProvider);
+    } on DioException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to mark notifications read.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => working = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    if (currentSession == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go('/auth?next=/notifications');
+      });
+    }
+    final asyncNotifications = ref.watch(notificationsProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Notifications'),
+        backgroundColor: background,
+        actions: [
+          asyncNotifications.maybeWhen(
+            data: (items) => items.any((item) => item.unread)
+                ? TextButton.icon(
+                    onPressed: working == null ? markAllRead : null,
+                    icon: working == 'all'
+                        ? const SizedBox.square(
+                            dimension: 15,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.done_all_rounded, size: 18),
+                    label: const Text('Read all'),
+                  )
+                : const SizedBox.shrink(),
+            orElse: () => const SizedBox.shrink(),
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(notificationsProvider);
+          ref.invalidate(notificationUnreadCountProvider);
+          await ref.read(notificationsProvider.future);
+        },
+        child: asyncNotifications.when(
+          loading: () =>
+              const Center(child: CircularProgressIndicator(color: ink)),
+          error: (_, _) => ListView(
+            padding: const EdgeInsets.all(28),
+            children: [
+              const SizedBox(height: 120),
+              const Icon(Icons.cloud_off_rounded, size: 42, color: muted),
+              const SizedBox(height: 14),
+              const Text(
+                'Notifications could not be loaded.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 14),
+              FilledButton(
+                onPressed: () => ref.invalidate(notificationsProvider),
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
+          data: (items) => items.isEmpty
+              ? ListView(
+                  padding: const EdgeInsets.all(28),
+                  children: const [
+                    SizedBox(height: 120),
+                    Icon(
+                      Icons.notifications_none_rounded,
+                      size: 44,
+                      color: muted,
+                    ),
+                    SizedBox(height: 14),
+                    Text(
+                      'No notifications yet',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(height: 7),
+                    Text(
+                      'Quest activity, reviews, follows, results, and rewards will appear here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: muted, height: 1.5),
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final notification = items[index];
+                    return Material(
+                      color: notification.unread
+                          ? const Color(0xFFF2FFD0)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      child: InkWell(
+                        onTap: working == null
+                            ? () => open(notification)
+                            : null,
+                        borderRadius: BorderRadius.circular(18),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: notification.unread
+                                    ? accent
+                                    : const Color(0xFFECEEE8),
+                                foregroundColor: ink,
+                                child: Icon(
+                                  _notificationIcon(notification.kind),
+                                  size: 19,
+                                ),
+                              ),
+                              const SizedBox(width: 13),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            notification.title,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                        Text(
+                                          _relativeNotificationTime(
+                                            notification.createdAt,
+                                          ),
+                                          style: const TextStyle(
+                                            color: muted,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      notification.body,
+                                      style: const TextStyle(
+                                        color: muted,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (working == notification.id)
+                                const Padding(
+                                  padding: EdgeInsets.only(left: 8, top: 10),
+                                  child: SizedBox.square(
+                                    dimension: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+IconData _notificationIcon(String kind) => switch (kind) {
+  'NEW_FOLLOWER' => Icons.person_add_alt_1_rounded,
+  'QUEST_WON' => Icons.emoji_events_rounded,
+  'PAYOUT_CONFIRMED' || 'PAYOUT_FAILED' => Icons.account_balance_wallet_rounded,
+  'ENTRY_APPROVED' => Icons.check_circle_rounded,
+  'ENTRY_REJECTED' => Icons.rule_rounded,
+  _ => Icons.notifications_rounded,
+};
+
+String _relativeNotificationTime(DateTime value) {
+  final difference = DateTime.now().difference(value);
+  if (difference.inMinutes < 1) return 'now';
+  if (difference.inHours < 1) return '${difference.inMinutes}m';
+  if (difference.inDays < 1) return '${difference.inHours}h';
+  return '${difference.inDays}d';
 }
 
 class _SaveQuestAction extends ConsumerStatefulWidget {

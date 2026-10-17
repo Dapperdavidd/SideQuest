@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, Link2, LoaderCircle, X } from "lucide-react";
 import { apiUrl, readApiError, type QuestInvitation } from "@/lib/api/quests";
 import { createClient } from "@/lib/supabase/client";
@@ -12,17 +12,18 @@ export function InvitationPanel({ questId }: { questId: string }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const { data: { session } } = await createClient().auth.getSession();
-    if (!session) return;
-    const response = await fetch(apiUrl(`/quests/${questId}/invitations`), {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-      cache: "no-store",
+  useEffect(() => {
+    let active = true;
+    createClient().auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return;
+      const response = await fetch(apiUrl(`/quests/${questId}/invitations`), {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      if (active && response.ok) setInvitations(await response.json() as QuestInvitation[]);
     });
-    if (response.ok) setInvitations(await response.json() as QuestInvitation[]);
+    return () => { active = false; };
   }, [questId]);
-
-  useEffect(() => { void load(); }, [load]);
 
   async function createInvitation() {
     setWorking(true);

@@ -40,6 +40,18 @@ export type QuestInvitation = {
   created_at: string;
 };
 
+export type AppNotification = {
+  id: string;
+  actor_id: string | null;
+  quest_id: string | null;
+  kind: "NEW_FOLLOWER" | "QUEST_JOINED" | "ENTRY_SUBMITTED" | "ENTRY_APPROVED" | "ENTRY_REJECTED" | "QUEST_WON" | "QUEST_FINALIZED" | "PAYOUT_CONFIRMED" | "PAYOUT_FAILED";
+  title: string;
+  body: string;
+  href: string;
+  read_at: string | null;
+  created_at: string;
+};
+
 export type ApiErrorBody = {
   code?: string;
   message?: string;
@@ -231,6 +243,25 @@ export async function getQuestSettlement(questId: string, accessToken: string): 
   });
   if (!response.ok) throw new Error("Unable to load this quest's settlement right now.");
   return response.json() as Promise<QuestSettlement>;
+}
+
+export async function getNotifications(accessToken: string): Promise<AppNotification[]> {
+  const response = await fetch(apiUrl("/users/me/notifications"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Unable to load notifications right now.");
+  return response.json() as Promise<AppNotification[]>;
+}
+
+export async function getUnreadNotificationCount(accessToken: string): Promise<number> {
+  const response = await fetch(apiUrl("/users/me/notifications/unread-count"), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) return 0;
+  const result = await response.json() as { unread_count: number };
+  return result.unread_count;
 }
 
 export async function readApiError(response: Response, fallback: string) {

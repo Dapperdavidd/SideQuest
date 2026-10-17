@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod entries;
 pub mod invitations;
+pub mod notifications;
 pub mod payments;
 pub mod profiles;
 pub mod quests;
@@ -80,6 +81,10 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(invitations::list_invitations)
             .service(invitations::revoke_invitation)
             .service(invitations::accept_invitation)
+            .service(notifications::list_notifications)
+            .service(notifications::unread_count)
+            .service(notifications::mark_notification_read)
+            .service(notifications::mark_all_notifications_read)
             .service(payments::create_funding_intent)
             .service(payments::get_payout_destination)
             .service(payments::set_payout_destination)

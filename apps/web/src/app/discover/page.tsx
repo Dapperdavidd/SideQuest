@@ -17,11 +17,13 @@ import { QuestCard } from "@/components/quest-card";
 import {
   formatDeadline,
   formatReward,
+  getUnreadNotificationCount,
   listQuests,
   questImageClass,
   type Quest,
 } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
+import { createClient } from "@/lib/supabase/server";
 
 type DiscoverPageProps = {
   searchParams: Promise<{ q?: string; type?: string }>;
@@ -50,7 +52,10 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
     : undefined;
   const viewerPromise = getViewer();
   const questsPromise = listQuests({ search, questType }).catch(() => null);
-  const [viewer, quests] = await Promise.all([viewerPromise, questsPromise]);
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const unreadPromise = session ? getUnreadNotificationCount(session.access_token) : Promise.resolve(0);
+  const [viewer, quests, unreadNotifications] = await Promise.all([viewerPromise, questsPromise, unreadPromise]);
   const firstName = viewer?.displayName.split(/\s+/)[0] || "Explorer";
   const initial = firstName.charAt(0).toUpperCase();
   const featured = quests?.[0] ?? null;
@@ -64,6 +69,7 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
             <Link className="flex items-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-dark" href="/discover"><Compass size={19} />Discover</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/quests" : "/auth?next=/quests"}><Trophy size={19} />Quests</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/wallet" : "/auth?next=/wallet"}><WalletCards size={19} />Wallet</Link>
+            <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/notifications" : "/auth?next=/notifications"}><Bell size={19} />Notifications{unreadNotifications ? <span className="ml-auto rounded-full bg-accent px-2 py-0.5 text-[0.65rem] font-bold text-dark">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span> : null}</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/create" : "/auth?next=/create"}><Plus size={19} />Create</Link>
             <Link className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-white/65 hover:bg-white/5 hover:text-white" href={viewer ? "/profile" : "/auth"}><UserRound size={19} />{viewer ? "Profile" : "Sign in"}</Link>
           </nav>
@@ -73,7 +79,7 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
           <header className="flex items-center gap-4 border-b border-white/10 px-5 py-4 sm:px-8">
             <div className="lg:hidden"><Logo inverse /></div>
             <form action="/discover" className="hidden max-w-md flex-1 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 sm:flex"><Search size={17} className="text-white/40" /><label htmlFor="discover-search" className="sr-only">Search quests</label><input id="discover-search" name="q" defaultValue={search} maxLength={80} className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35" placeholder="Search quests or creators…" />{questType ? <input type="hidden" name="type" value={questType} /> : null}<button type="submit" className="text-xs font-bold text-accent">Search</button></form>
-            <button aria-label="Notifications" className="ml-auto grid h-10 w-10 place-items-center rounded-full border border-white/10"><Bell size={18} /></button>
+            <Link href={viewer ? "/notifications" : "/auth?next=/notifications"} aria-label="Notifications" className="relative ml-auto grid h-10 w-10 place-items-center rounded-full border border-white/10"><Bell size={18} />{unreadNotifications ? <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-accent px-1 text-[0.6rem] font-bold text-dark">{unreadNotifications > 9 ? "9+" : unreadNotifications}</span> : null}</Link>
             <Link href={viewer ? "/profile" : "/auth"} aria-label={viewer ? "Open profile" : "Sign in"} className="grid h-10 w-10 place-items-center rounded-full bg-accent font-display font-bold text-dark">{initial}</Link>
           </header>
           <div className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
