@@ -660,6 +660,25 @@ class QuestRepository {
     );
   }
 
+  Future<void> submitReport(
+    String subjectType,
+    String targetId,
+    String reason,
+    String? details,
+    String accessToken,
+  ) async {
+    await _dio.post<void>(
+      '/reports',
+      data: {
+        'subject_type': subjectType,
+        'target_id': targetId,
+        'reason': reason,
+        'details': details,
+      },
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
   Future<List<UserProfile>> listFollowers(String userId) async {
     final response = await _dio.get<List<dynamic>>('/users/$userId/followers');
     return response.data!
@@ -2243,6 +2262,23 @@ class _QuestDetail extends ConsumerWidget {
                       )
                       .toList(growable: false),
                 ),
+                if (!isCreator) ...[
+                  const SizedBox(height: 24),
+                  Align(
+                    alignment: Alignment.center,
+                    child: TextButton.icon(
+                      onPressed: () => showReportSheet(
+                        context,
+                        ref,
+                        subjectType: 'QUEST',
+                        targetId: quest.id,
+                        returnPath: '/quests/${quest.id}',
+                      ),
+                      icon: const Icon(Icons.flag_outlined, size: 17),
+                      label: const Text('Report quest'),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -6368,6 +6404,160 @@ class _PayoutStatus extends StatelessWidget {
   );
 }
 
+Future<void> showReportSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  required String subjectType,
+  required String targetId,
+  required String returnPath,
+}) async {
+  final session = currentSession;
+  if (session == null) {
+    context.push('/auth?next=${Uri.encodeComponent(returnPath)}');
+    return;
+  }
+  var reason = 'SAFETY';
+  var working = false;
+  String? errorMessage;
+  final details = TextEditingController();
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (context, setModalState) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          20 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Report content',
+              style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Your report enters a review queue. It does not automatically remove content.',
+              style: TextStyle(color: muted, height: 1.4),
+            ),
+            const SizedBox(height: 18),
+            DropdownButtonFormField<String>(
+              initialValue: reason,
+              decoration: const InputDecoration(
+                labelText: 'Reason',
+                border: OutlineInputBorder(),
+              ),
+              items:
+                  const {
+                        'SAFETY': 'Safety concern',
+                        'SPAM': 'Spam',
+                        'HARASSMENT': 'Harassment',
+                        'MISLEADING': 'Misleading content',
+                        'INAPPROPRIATE': 'Inappropriate content',
+                        'OTHER': 'Something else',
+                      }.entries
+                      .map(
+                        (entry) => DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                      )
+                      .toList(growable: false),
+              onChanged: working ? null : (value) => reason = value ?? 'SAFETY',
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: details,
+              minLines: 3,
+              maxLines: 5,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Details (optional)',
+                hintText: 'Share enough context for a reviewer.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (errorMessage != null) ...[
+              const SizedBox(height: 10),
+              Text(errorMessage!, style: const TextStyle(color: Colors.red)),
+            ],
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: working
+                  ? null
+                  : () async {
+                      final note = details.text.trim();
+                      if (note.isNotEmpty && note.length < 3) {
+                        setModalState(
+                          () => errorMessage =
+                              'Add at least three characters of detail.',
+                        );
+                        return;
+                      }
+                      setModalState(() {
+                        working = true;
+                        errorMessage = null;
+                      });
+                      try {
+                        await ref
+                            .read(questRepositoryProvider)
+                            .submitReport(
+                              subjectType,
+                              targetId,
+                              reason,
+                              note.isEmpty ? null : note,
+                              session.accessToken,
+                            );
+                        if (sheetContext.mounted) {
+                          Navigator.pop(sheetContext);
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Report received and added to the review queue.',
+                              ),
+                            ),
+                          );
+                        }
+                      } on DioException catch (error) {
+                        final data = error.response?.data;
+                        setModalState(() {
+                          working = false;
+                          errorMessage = data is Map<String, dynamic>
+                              ? data['message'] as String? ??
+                                    'The report could not be submitted.'
+                              : 'The report could not be submitted.';
+                        });
+                      }
+                    },
+              style: FilledButton.styleFrom(
+                backgroundColor: ink,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(52),
+              ),
+              icon: working
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(Icons.flag_outlined),
+              label: Text(working ? 'Sending…' : 'Submit report'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  details.dispose();
+}
+
 class ConnectionListScreen extends ConsumerWidget {
   const ConnectionListScreen({
     required this.username,
@@ -6675,6 +6865,20 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
                                 ),
                           label: Text(following ? 'Following' : 'Follow'),
                         ),
+                      if (!ownProfile) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () => showReportSheet(
+                            context,
+                            ref,
+                            subjectType: 'USER',
+                            targetId: profile.id,
+                            returnPath: '/users/${profile.username}',
+                          ),
+                          icon: const Icon(Icons.flag_outlined, size: 17),
+                          label: const Text('Report profile'),
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       Row(
                         children: [

@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { JoinButton } from "./join-button";
 import { SaveQuestButton } from "./save-quest-button";
 import { InvitationPanel } from "./invitation-panel";
+import { ReportContentButton } from "@/components/report-content-button";
 
 type QuestPageProps = {
   params: Promise<{ id: string }>;
@@ -75,6 +76,7 @@ async function QuestExperience({ params }: QuestPageProps) {
             <div className="mt-6">{viewer?.id === quest.creator_id ? <Link href={quest.status === "FINALIZED" && quest.reward_enabled ? `/quests/${quest.id}/settlement` : `/quests/${quest.id}/review`} className="block w-full rounded-xl bg-accent px-6 py-4 text-center font-bold text-dark">{quest.status === "FINALIZED" && quest.reward_enabled ? "Track payouts" : "Review submissions"}</Link> : <JoinButton questId={quest.id} isCreator={false} isOpen={isOpen} initialJoined={quest.viewer_joined} />}</div>
             {viewer?.id !== quest.creator_id && quest.visibility === "PUBLIC" ? <SaveQuestButton questId={quest.id} initialSaved={initiallySaved} /> : null}
             {viewer?.id === quest.creator_id && quest.visibility !== "PUBLIC" && isOpen ? <InvitationPanel questId={quest.id} /> : null}
+            {viewer?.id !== quest.creator_id ? <div className="mt-5 flex justify-center"><ReportContentButton subjectType="QUEST" targetId={quest.id} returnPath={`/quests/${quest.id}`} /></div> : null}
           </div>
         </aside>
       </div>

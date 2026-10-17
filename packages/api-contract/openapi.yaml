@@ -745,6 +745,32 @@ paths:
           description: Rules are valid
         "422":
           description: Rules violate product limits
+  /reports:
+    post:
+      summary: Submit an authenticated content-safety report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReport"
+      responses:
+        "201":
+          description: Report added to the moderation queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentReport"
+        "403":
+          description: Users cannot report their own content
+        "404":
+          description: Report target not found
+        "409":
+          description: An active report already exists for this target
+        "422":
+          description: Report input is invalid
 components:
   parameters:
     QuestId:
@@ -760,6 +786,50 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    CreateReport:
+      type: object
+      required: [subject_type, target_id, reason]
+      properties:
+        subject_type:
+          type: string
+          enum: [QUEST, USER]
+        target_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          enum: [SAFETY, SPAM, HARASSMENT, MISLEADING, INAPPROPRIATE, OTHER]
+        details:
+          type: [string, "null"]
+          minLength: 3
+          maxLength: 500
+    ContentReport:
+      type: object
+      required: [id, subject_type, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject_type:
+          type: string
+          enum: [QUEST, USER]
+        quest_id:
+          type: [string, "null"]
+          format: uuid
+        user_id:
+          type: [string, "null"]
+          format: uuid
+        reason:
+          type: string
+          enum: [SAFETY, SPAM, HARASSMENT, MISLEADING, INAPPROPRIATE, OTHER]
+        details:
+          type: [string, "null"]
+        status:
+          type: string
+          enum: [OPEN, REVIEWING, RESOLVED, DISMISSED]
+        created_at:
+          type: string
+          format: date-time
     PayoutDestination:
       type: object
       required: [network, address, updated_at]
