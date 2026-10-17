@@ -76,6 +76,7 @@ Run the mobile app:
 cd apps/mobile
 flutter run \
   --dart-define=API_URL=http://127.0.0.1:8080/api/v1 \
+  --dart-define=MOBILE_WEB_URL=http://localhost:3000 \
   --dart-define=SUPABASE_URL=https://your-project.supabase.co \
   --dart-define=SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 ```

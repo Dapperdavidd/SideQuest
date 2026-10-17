@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -17,6 +18,10 @@ const line = Color(0xFFE6E8E2);
 const apiBaseUrl = String.fromEnvironment(
   'API_URL',
   defaultValue: 'http://127.0.0.1:8080/api/v1',
+);
+const webBaseUrl = String.fromEnvironment(
+  'MOBILE_WEB_URL',
+  defaultValue: 'http://localhost:3000',
 );
 const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const supabasePublishableKey = String.fromEnvironment(
@@ -87,6 +92,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/quests/:id/settlement',
         builder: (context, state) =>
             QuestSettlementScreen(questId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/quests/:id/invitations',
+        builder: (context, state) =>
+            QuestInvitationsScreen(questId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/invite/:token',
+        builder: (context, state) =>
+            InviteAcceptanceScreen(token: state.pathParameters['token']!),
       ),
       GoRoute(
         path: '/auth',
@@ -163,6 +178,9 @@ class Quest {
     required this.rewardAmountMinor,
     required this.rewardCurrency,
     required this.proofRequirements,
+    this.creatorId = '',
+    this.visibility = 'PUBLIC',
+    this.viewerJoined = false,
     this.winnerSelectionMethod = 'FIRST_VALID',
     this.coverMediaUrl,
   });
@@ -172,6 +190,7 @@ class Quest {
     title: json['title'] as String,
     creator: json['creator_display_name'] as String,
     creatorUsername: json['creator_username'] as String,
+    creatorId: json['creator_id'] as String,
     description: json['description'] as String,
     questType: json['quest_type'] as String,
     status: json['status'] as String,
@@ -185,6 +204,8 @@ class Quest {
     rewardCurrency: json['reward_currency'] as String?,
     proofRequirements: (json['proof_requirements'] as List<dynamic>)
         .cast<String>(),
+    visibility: json['visibility'] as String? ?? 'PUBLIC',
+    viewerJoined: json['viewer_joined'] as bool? ?? false,
     winnerSelectionMethod:
         json['winner_selection_method'] as String? ?? 'FIRST_VALID',
     coverMediaUrl: json['cover_media_url'] as String?,
@@ -194,6 +215,7 @@ class Quest {
   final String title;
   final String creator;
   final String creatorUsername;
+  final String creatorId;
   final String description;
   final String questType;
   final String status;
@@ -206,6 +228,8 @@ class Quest {
   final int? rewardAmountMinor;
   final String? rewardCurrency;
   final List<String> proofRequirements;
+  final String visibility;
+  final bool viewerJoined;
   final String winnerSelectionMethod;
   final String? coverMediaUrl;
 
@@ -233,6 +257,41 @@ class Quest {
   }
 }
 
+class QuestInvitation {
+  const QuestInvitation({
+    required this.id,
+    required this.token,
+    required this.maxUses,
+    required this.useCount,
+    required this.expiresAt,
+    required this.revokedAt,
+  });
+
+  factory QuestInvitation.fromJson(Map<String, dynamic> json) =>
+      QuestInvitation(
+        id: json['id'] as String,
+        token: json['token'] as String,
+        maxUses: (json['max_uses'] as num).toInt(),
+        useCount: (json['use_count'] as num).toInt(),
+        expiresAt: DateTime.parse(json['expires_at'] as String).toLocal(),
+        revokedAt: json['revoked_at'] == null
+            ? null
+            : DateTime.parse(json['revoked_at'] as String).toLocal(),
+      );
+
+  final String id;
+  final String token;
+  final int maxUses;
+  final int useCount;
+  final DateTime expiresAt;
+  final DateTime? revokedAt;
+
+  bool get active =>
+      revokedAt == null &&
+      expiresAt.isAfter(DateTime.now()) &&
+      useCount < maxUses;
+}
+
 class QuestRepository {
   QuestRepository([Dio? dio])
     : _dio = dio ?? Dio(BaseOptions(baseUrl: apiBaseUrl));
@@ -247,7 +306,15 @@ class QuestRepository {
   }
 
   Future<Quest> getQuest(String id) async {
-    final response = await _dio.get<Map<String, dynamic>>('/quests/$id');
+    final session = currentSession;
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/quests/$id',
+      options: session == null
+          ? null
+          : Options(
+              headers: {'Authorization': 'Bearer ${session.accessToken}'},
+            ),
+    );
     return Quest.fromJson(response.data!);
   }
 
@@ -319,6 +386,51 @@ class QuestRepository {
       '/quests/$questId/saved',
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
+  }
+
+  Future<List<QuestInvitation>> listInvitations(
+    String questId,
+    String accessToken,
+  ) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/quests/$questId/invitations',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!
+        .map((json) => QuestInvitation.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<QuestInvitation> createInvitation(
+    String questId,
+    int maxUses,
+    String accessToken,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/quests/$questId/invitations',
+      data: {'max_uses': maxUses},
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return QuestInvitation.fromJson(response.data!);
+  }
+
+  Future<void> revokeInvitation(
+    String questId,
+    String invitationId,
+    String accessToken,
+  ) async {
+    await _dio.delete<void>(
+      '/quests/$questId/invitations/$invitationId',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
+  Future<String> acceptInvitation(String token, String accessToken) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/invitations/$token/accept',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return response.data!['quest_id'] as String;
   }
 
   Future<Quest> createQuest(
@@ -1662,14 +1774,15 @@ class QuestDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (initialQuest != null) return _QuestDetail(quest: initialQuest!);
     return ref
         .watch(questProvider(questId))
         .when(
           data: (quest) => _QuestDetail(quest: quest),
-          loading: () => const Scaffold(
-            body: Center(child: CircularProgressIndicator(color: ink)),
-          ),
+          loading: () => initialQuest != null
+              ? _QuestDetail(quest: initialQuest!)
+              : const Scaffold(
+                  body: Center(child: CircularProgressIndicator(color: ink)),
+                ),
           error: (_, _) => Scaffold(
             appBar: AppBar(backgroundColor: background),
             body: Center(
@@ -1709,6 +1822,7 @@ class _QuestDetail extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final remaining = math.max(0, quest.maxEntries - quest.entriesReceived);
+    final isCreator = currentSession?.user.id == quest.creatorId;
     final winners = quest.status == 'FINALIZED'
         ? ref.watch(questWinnersProvider(quest.id))
         : const AsyncValue<List<PublicWinner>>.data([]);
@@ -1720,7 +1834,10 @@ class _QuestDetail extends ConsumerWidget {
             pinned: true,
             backgroundColor: ink,
             foregroundColor: Colors.white,
-            actions: [_SaveQuestAction(questId: quest.id)],
+            actions: [
+              if (!isCreator && quest.visibility == 'PUBLIC')
+                _SaveQuestAction(questId: quest.id),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,
@@ -1959,7 +2076,40 @@ class _QuestDetail extends ConsumerWidget {
       bottomNavigationBar: quest.status == 'OPEN'
           ? SafeArea(
               minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-              child: JoinQuestButton(questId: quest.id),
+              child: isCreator
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (quest.visibility != 'PUBLIC') ...[
+                          FilledButton.icon(
+                            onPressed: () =>
+                                context.push('/quests/${quest.id}/invitations'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: accent,
+                              foregroundColor: ink,
+                              minimumSize: const Size.fromHeight(54),
+                            ),
+                            icon: const Icon(Icons.link_rounded),
+                            label: const Text(
+                              'Manage invitation links',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        TextButton(
+                          onPressed: () => context.push(
+                            '/quests/${quest.id}/review',
+                            extra: quest,
+                          ),
+                          child: const Text('Review submissions'),
+                        ),
+                      ],
+                    )
+                  : JoinQuestButton(
+                      questId: quest.id,
+                      initialJoined: quest.viewerJoined,
+                    ),
             )
           : null,
     );
@@ -1967,8 +2117,13 @@ class _QuestDetail extends ConsumerWidget {
 }
 
 class JoinQuestButton extends ConsumerStatefulWidget {
-  const JoinQuestButton({required this.questId, super.key});
+  const JoinQuestButton({
+    required this.questId,
+    this.initialJoined = false,
+    super.key,
+  });
   final String questId;
+  final bool initialJoined;
 
   @override
   ConsumerState<JoinQuestButton> createState() => _JoinQuestButtonState();
@@ -1976,7 +2131,13 @@ class JoinQuestButton extends ConsumerStatefulWidget {
 
 class _JoinQuestButtonState extends ConsumerState<JoinQuestButton> {
   bool loading = false;
-  bool joined = false;
+  late bool joined;
+
+  @override
+  void initState() {
+    super.initState();
+    joined = widget.initialJoined;
+  }
 
   Future<void> join() async {
     final session = currentSession;
@@ -2049,6 +2210,416 @@ class _JoinQuestButtonState extends ConsumerState<JoinQuestButton> {
       ],
     );
   }
+}
+
+class InviteAcceptanceScreen extends ConsumerStatefulWidget {
+  const InviteAcceptanceScreen({required this.token, super.key});
+
+  final String token;
+
+  @override
+  ConsumerState<InviteAcceptanceScreen> createState() =>
+      _InviteAcceptanceScreenState();
+}
+
+class _InviteAcceptanceScreenState
+    extends ConsumerState<InviteAcceptanceScreen> {
+  bool working = false;
+  String? errorMessage;
+
+  Future<void> accept() async {
+    final session = currentSession;
+    if (session == null) {
+      context.push(
+        '/auth?next=${Uri.encodeComponent('/invite/${widget.token}')}',
+      );
+      return;
+    }
+    setState(() {
+      working = true;
+      errorMessage = null;
+    });
+    try {
+      final questId = await ref
+          .read(questRepositoryProvider)
+          .acceptInvitation(widget.token, session.accessToken);
+      ref.invalidate(myQuestsProvider);
+      ref.invalidate(questProvider(questId));
+      if (mounted) context.go('/quests/$questId');
+    } on DioException catch (error) {
+      final body = error.response?.data;
+      setState(() {
+        errorMessage = body is Map<String, dynamic>
+            ? body['message'] as String? ??
+                  'This invitation cannot be accepted.'
+            : 'This invitation cannot be accepted.';
+      });
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(authStateProvider);
+    return Scaffold(
+      appBar: AppBar(backgroundColor: background),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 430),
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: line),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircleAvatar(
+                  radius: 32,
+                  backgroundColor: Color(0xFFE9FFB0),
+                  foregroundColor: ink,
+                  child: Icon(Icons.link_rounded, size: 28),
+                ),
+                const SizedBox(height: 22),
+                const Text(
+                  "You're invited",
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Accept this private invitation to see the quest and join the challenge.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: muted, height: 1.5),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: working ? null : accept,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: ink,
+                    minimumSize: const Size.fromHeight(54),
+                  ),
+                  icon: working
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            color: ink,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.link_rounded),
+                  label: Text(
+                    working
+                        ? 'Accepting…'
+                        : currentSession == null
+                        ? 'Sign in to accept'
+                        : 'Accept invitation',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFF8F2E1E)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class QuestInvitationsScreen extends ConsumerStatefulWidget {
+  const QuestInvitationsScreen({required this.questId, super.key});
+
+  final String questId;
+
+  @override
+  ConsumerState<QuestInvitationsScreen> createState() =>
+      _QuestInvitationsScreenState();
+}
+
+class _QuestInvitationsScreenState
+    extends ConsumerState<QuestInvitationsScreen> {
+  List<QuestInvitation> invitations = const [];
+  int maxUses = 5;
+  bool loading = true;
+  bool working = false;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => load());
+  }
+
+  Future<void> load() async {
+    final session = currentSession;
+    if (session == null) {
+      if (mounted) {
+        context.go('/auth?next=/quests/${widget.questId}/invitations');
+      }
+      return;
+    }
+    setState(() {
+      loading = true;
+      errorMessage = null;
+    });
+    try {
+      final result = await ref
+          .read(questRepositoryProvider)
+          .listInvitations(widget.questId, session.accessToken);
+      if (mounted) setState(() => invitations = result);
+    } on DioException catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              errorMessage = _apiMessage(error, 'Unable to load invitations.'),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> create() async {
+    final session = currentSession;
+    if (session == null) return;
+    setState(() {
+      working = true;
+      errorMessage = null;
+    });
+    try {
+      final invitation = await ref
+          .read(questRepositoryProvider)
+          .createInvitation(widget.questId, maxUses, session.accessToken);
+      if (!mounted) return;
+      setState(() => invitations = [invitation, ...invitations]);
+      await copy(invitation);
+    } on DioException catch (error) {
+      if (mounted) {
+        setState(
+          () => errorMessage = _apiMessage(
+            error,
+            'Unable to create an invitation.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  Future<void> copy(QuestInvitation invitation) async {
+    final link =
+        '${webBaseUrl.replaceFirst(RegExp(r'/$'), '')}/invite/${invitation.token}';
+    await Clipboard.setData(ClipboardData(text: link));
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invitation link copied.')));
+    }
+  }
+
+  Future<void> revoke(QuestInvitation invitation) async {
+    final session = currentSession;
+    if (session == null) return;
+    setState(() {
+      working = true;
+      errorMessage = null;
+    });
+    try {
+      await ref
+          .read(questRepositoryProvider)
+          .revokeInvitation(widget.questId, invitation.id, session.accessToken);
+      await load();
+    } on DioException catch (error) {
+      if (mounted) {
+        setState(
+          () => errorMessage = _apiMessage(
+            error,
+            'Unable to revoke this invitation.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  String _apiMessage(DioException error, String fallback) {
+    final body = error.response?.data;
+    return body is Map<String, dynamic>
+        ? body['message'] as String? ?? fallback
+        : fallback;
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('Invitation links'),
+      backgroundColor: background,
+    ),
+    body: RefreshIndicator(
+      onRefresh: load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+        children: [
+          const Text(
+            'Invite people privately',
+            style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Each accepted link grants quest access and creates membership. Links expire after seven days or when the quest deadline arrives.',
+            style: TextStyle(color: muted, height: 1.5),
+          ),
+          const SizedBox(height: 22),
+          const Text(
+            'Maximum uses',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 1, label: Text('1')),
+              ButtonSegment(value: 3, label: Text('3')),
+              ButtonSegment(value: 5, label: Text('5')),
+              ButtonSegment(value: 10, label: Text('10')),
+            ],
+            selected: {maxUses},
+            onSelectionChanged: working
+                ? null
+                : (value) => setState(() => maxUses = value.first),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: working ? null : create,
+            style: FilledButton.styleFrom(
+              backgroundColor: accent,
+              foregroundColor: ink,
+              minimumSize: const Size.fromHeight(52),
+            ),
+            icon: working
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      color: ink,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.add_link_rounded),
+            label: const Text('Create and copy link'),
+          ),
+          if (errorMessage != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEAE5),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                errorMessage!,
+                style: const TextStyle(color: Color(0xFF8F2E1E)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 26),
+          const Text(
+            'Created links',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          if (loading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(color: ink),
+              ),
+            )
+          else if (invitations.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Text(
+                'No invitation links yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: muted),
+              ),
+            )
+          else
+            for (final invitation in invitations) ...[
+              Card(
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: invitation.active
+                            ? const Color(0xFFE9FFB0)
+                            : line,
+                        foregroundColor: ink,
+                        child: Icon(
+                          invitation.active
+                              ? Icons.link_rounded
+                              : Icons.link_off_rounded,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${invitation.useCount}/${invitation.maxUses} accepted',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              invitation.active
+                                  ? 'Expires ${_shortDate(invitation.expiresAt)}'
+                                  : 'Inactive',
+                              style: const TextStyle(
+                                color: muted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (invitation.active) ...[
+                        IconButton(
+                          onPressed: () => copy(invitation),
+                          icon: const Icon(Icons.copy_rounded),
+                        ),
+                        IconButton(
+                          onPressed: working ? null : () => revoke(invitation),
+                          icon: const Icon(Icons.close_rounded),
+                          color: const Color(0xFF8F2E1E),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+        ],
+      ),
+    ),
+  );
 }
 
 class _SaveQuestAction extends ConsumerStatefulWidget {
@@ -3496,6 +4067,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   final rewardController = TextEditingController(text: '10');
   int step = 0;
   String questType = 'FRIENDS';
+  String visibility = 'PUBLIC';
   DateTime deadline = DateTime.now().add(const Duration(days: 7));
   bool isGroup = false;
   int groupSize = 2;
@@ -3574,7 +4146,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'description': descriptionController.text.trim(),
         'cover_media_url': null,
         'quest_type': questType,
-        'visibility': 'PUBLIC',
+        'visibility': visibility,
         'is_group_challenge': isGroup,
         'required_group_size': isGroup ? groupSize : null,
         'max_entries': maxEntries,
@@ -3873,6 +4445,27 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           ),
           subtitle: const Text('One representative submits for the group.'),
         ),
+        const SizedBox(height: 16),
+        const Text(
+          'Quest access',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'PUBLIC', label: Text('Public')),
+            ButtonSegment(value: 'PRIVATE', label: Text('Private')),
+            ButtonSegment(value: 'INVITE_ONLY', label: Text('Invite')),
+          ],
+          selected: {visibility},
+          onSelectionChanged: (value) =>
+              setState(() => visibility = value.first),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          visibility == 'PUBLIC' ? 'Anyone can discover and join this quest.' : 'Only people who accept one of your invitation links can open and join this quest.',
+          style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
+        ),
         if (isGroup) ...[
           const SizedBox(height: 10),
           const Text('Required group size'),
@@ -4022,6 +4615,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     final rows = <(String, String)>[
       ('Quest', titleController.text.trim()),
       ('Type', questType.toLowerCase()),
+      ('Access', visibility == 'PUBLIC' ? 'public' : 'invitation link only'),
       ('Deadline', _shortDate(deadline)),
       ('Participation', isGroup ? 'Group of $groupSize' : 'Individual'),
       ('Entries', '$maxEntries maximum'),
