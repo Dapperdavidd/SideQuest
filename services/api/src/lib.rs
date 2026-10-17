@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod checkpoints;
 pub mod entries;
 pub mod invitations;
 pub mod moderation;
@@ -83,6 +84,10 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(quests::save_quest)
             .service(quests::remove_saved_quest)
             .service(quests::validate_quest)
+            .service(checkpoints::list_checkpoints)
+            .service(checkpoints::create_checkpoint)
+            .service(checkpoints::delete_checkpoint)
+            .service(checkpoints::complete_checkpoint)
             .service(invitations::create_invitation)
             .service(invitations::list_invitations)
             .service(invitations::revoke_invitation)

@@ -475,6 +475,94 @@ paths:
           description: Quest is closed, already joined, or owned by the user
         "404":
           description: Private quest access has not been granted by an invitation
+  /quests/{questId}/checkpoints:
+    get:
+      summary: List ordered checkpoints visible to the caller
+      description: Verification codes are included only when the authenticated caller created the quest.
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      responses:
+        "200":
+          description: Ordered checkpoints with caller-specific completion state
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Checkpoint"
+        "404":
+          description: Quest is missing or inaccessible to the caller
+    post:
+      summary: Add a checkpoint to a creator-owned draft quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCheckpoint"
+      responses:
+        "201":
+          description: Checkpoint created with a private verification code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Checkpoint"
+        "403":
+          description: The authenticated user is not the creator
+        "409":
+          description: Quest is no longer a draft or already has twenty checkpoints
+        "422":
+          description: Checkpoint details are invalid
+  /quests/{questId}/checkpoints/{checkpointId}:
+    delete:
+      summary: Delete a checkpoint from a creator-owned draft quest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+        - $ref: "#/components/parameters/CheckpointId"
+      responses:
+        "204":
+          description: Checkpoint deleted
+        "404":
+          description: Checkpoint is missing or cannot be changed by the caller
+  /quests/{questId}/checkpoints/{checkpointId}/complete:
+    post:
+      summary: Complete the next checkpoint using its private verification code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+        - $ref: "#/components/parameters/CheckpointId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verification_code]
+              properties:
+                verification_code:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Idempotent checkpoint completion and aggregate progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckpointCompletion"
+        "409":
+          description: Quest is closed, caller has not joined, or an earlier checkpoint is incomplete
+        "422":
+          description: Verification code does not match
   /quests/{questId}/invitations:
     get:
       summary: List invitation links created for a private quest
@@ -863,12 +951,74 @@ components:
       schema:
         type: string
         format: uuid
+    CheckpointId:
+      in: path
+      name: checkpointId
+      required: true
+      schema:
+        type: string
+        format: uuid
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    CreateCheckpoint:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 2
+          maxLength: 100
+        instructions:
+          type: [string, "null"]
+          minLength: 2
+          maxLength: 500
+    Checkpoint:
+      type: object
+      required: [id, quest_id, position, title]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quest_id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          minimum: 1
+          maximum: 20
+        title:
+          type: string
+        instructions:
+          type: [string, "null"]
+        verification_code:
+          type: [string, "null"]
+          format: uuid
+          description: Present only for the quest creator.
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+    CheckpointCompletion:
+      type: object
+      required: [checkpoint_id, completed_at, completed_count, total_count, quest_complete]
+      properties:
+        checkpoint_id:
+          type: string
+          format: uuid
+        completed_at:
+          type: string
+          format: date-time
+        completed_count:
+          type: integer
+          minimum: 1
+        total_count:
+          type: integer
+          minimum: 1
+        quest_complete:
+          type: boolean
     CreatorAnalytics:
       type: object
       required: [active_quests, entries_received, valid_submissions, winners_selected, rewards_paid_minor]
