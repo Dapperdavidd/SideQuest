@@ -351,6 +351,27 @@ paths:
           schema:
             type: string
             enum: [FRIENDS, BOUNTY, EXPLORE]
+        - in: query
+          name: latitude
+          description: Viewer latitude for nearby discovery. Must be supplied with longitude.
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+        - in: query
+          name: longitude
+          description: Viewer longitude for nearby discovery. Must be supplied with latitude.
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+        - in: query
+          name: radius_km
+          description: Maximum nearby distance in kilometres. Defaults to 25 when coordinates are supplied.
+          schema:
+            type: number
+            minimum: 1
+            maximum: 200
       responses:
         "200":
           description: Public quests ordered by publish time
@@ -1180,6 +1201,18 @@ components:
           type: [string, "null"]
           format: uri
           maxLength: 2048
+        location_name:
+          type: [string, "null"]
+          minLength: 2
+          maxLength: 120
+        latitude:
+          type: [number, "null"]
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: [number, "null"]
+          minimum: -180
+          maximum: 180
         quest_type:
           type: string
           enum: [FRIENDS, BOUNTY, EXPLORE]
@@ -1266,6 +1299,10 @@ components:
               type: integer
             viewer_joined:
               type: boolean
+            distance_km:
+              type: [number, "null"]
+              minimum: 0
+              description: Great-circle distance from supplied discovery coordinates; null otherwise.
             created_at:
               type: string
               format: date-time

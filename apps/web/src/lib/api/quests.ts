@@ -7,6 +7,10 @@ export type Quest = {
   title: string;
   description: string;
   cover_media_url: string | null;
+  location_name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  distance_km: number | null;
   quest_type: "FRIENDS" | "BOUNTY" | "EXPLORE";
   visibility: "PUBLIC" | "PRIVATE" | "INVITE_ONLY";
   is_group_challenge: boolean;
@@ -171,10 +175,15 @@ export function apiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
-export async function listQuests(filters: { search?: string; questType?: Quest["quest_type"] } = {}, accessToken?: string): Promise<Quest[]> {
+export async function listQuests(filters: { search?: string; questType?: Quest["quest_type"]; latitude?: number; longitude?: number; radiusKm?: number } = {}, accessToken?: string): Promise<Quest[]> {
   const query = new URLSearchParams();
   if (filters.search?.trim()) query.set("search", filters.search.trim());
   if (filters.questType) query.set("quest_type", filters.questType);
+  if (filters.latitude !== undefined && filters.longitude !== undefined) {
+    query.set("latitude", filters.latitude.toString());
+    query.set("longitude", filters.longitude.toString());
+    query.set("radius_km", (filters.radiusKm ?? 25).toString());
+  }
   const suffix = query.size ? `?${query.toString()}` : "";
   const response = await fetch(apiUrl(`/quests${suffix}`), {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,

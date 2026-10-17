@@ -105,6 +105,10 @@ pub struct Quest {
     pub title: String,
     pub description: String,
     pub cover_media_url: Option<String>,
+    pub location_name: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub distance_km: Option<f64>,
     pub quest_type: String,
     pub visibility: String,
     pub is_group_challenge: bool,
@@ -132,6 +136,9 @@ pub struct CreateQuest {
     title: String,
     description: String,
     cover_media_url: Option<String>,
+    location_name: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
     quest_type: String,
     #[serde(default = "default_visibility")]
     visibility: String,
@@ -160,6 +167,9 @@ pub struct QuestListQuery {
     limit: Option<i64>,
     search: Option<String>,
     quest_type: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    radius_km: Option<f64>,
 }
 
 impl QuestListQuery {
@@ -189,6 +199,26 @@ impl QuestListQuery {
             return Err(QuestError::InvalidQuest);
         }
         Ok(quest_type)
+    }
+
+    fn nearby(&self) -> Result<Option<(f64, f64, f64)>, QuestError> {
+        match (self.latitude, self.longitude) {
+            (None, None) if self.radius_km.is_none() => Ok(None),
+            (Some(latitude), Some(longitude))
+                if latitude.is_finite()
+                    && longitude.is_finite()
+                    && (-90.0..=90.0).contains(&latitude)
+                    && (-180.0..=180.0).contains(&longitude) =>
+            {
+                let radius = self.radius_km.unwrap_or(25.0);
+                if radius.is_finite() && (1.0..=200.0).contains(&radius) {
+                    Ok(Some((latitude, longitude, radius)))
+                } else {
+                    Err(QuestError::InvalidQuest)
+                }
+            }
+            _ => Err(QuestError::InvalidQuest),
+        }
     }
 }
 
@@ -317,6 +347,22 @@ impl CreateQuest {
             return Err(QuestError::InvalidQuest);
         }
 
+        match (self.location_name.as_deref(), self.latitude, self.longitude) {
+            (None, None, None)
+                if !self
+                    .proof_requirements
+                    .iter()
+                    .any(|proof| proof == "LOCATION") => {}
+            (Some(name), Some(latitude), Some(longitude))
+                if self.quest_type == "EXPLORE"
+                    && (2..=120).contains(&name.trim().chars().count())
+                    && latitude.is_finite()
+                    && longitude.is_finite()
+                    && (-90.0..=90.0).contains(&latitude)
+                    && (-180.0..=180.0).contains(&longitude) => {}
+            _ => return Err(QuestError::InvalidQuest),
+        }
+
         match (self.is_group_challenge, self.required_group_size) {
             (true, Some(2..=50)) | (false, None) => {}
             _ => return Err(QuestError::InvalidQuest),
@@ -362,6 +408,10 @@ pub async fn list_quests(
     let limit = query.limit.unwrap_or(20).clamp(1, 50);
     let search = query.normalized_search()?;
     let quest_type = query.normalized_quest_type()?;
+    let nearby = query.nearby()?;
+    let (latitude, longitude, radius_km) = nearby
+        .map(|(latitude, longitude, radius)| (Some(latitude), Some(longitude), Some(radius)))
+        .unwrap_or((None, None, None));
     let viewer = state.auth.authenticate_optional(&request).await?;
     let quests = sqlx::query_as::<_, Quest>(
         r#"
@@ -373,6 +423,10 @@ pub async fn list_quests(
                q.title,
                q.description,
                q.cover_media_url,
+               q.location_name,
+               q.latitude,
+               q.longitude,
+               distance.distance_km,
                q.quest_type::text as quest_type,
                q.visibility::text as visibility,
                q.is_group_challenge,
@@ -395,6 +449,16 @@ pub async fn list_quests(
                false as viewer_joined
         from public.quests q
         join public.users u on u.id = q.creator_id
+        cross join lateral (
+          select case
+            when $5::double precision is null or q.latitude is null then null
+            else 6371.0 * acos(least(1.0, greatest(-1.0,
+              cos(radians($5)) * cos(radians(q.latitude))
+              * cos(radians(q.longitude) - radians($6))
+              + sin(radians($5)) * sin(radians(q.latitude))
+            )))
+          end as distance_km
+        ) distance
         where q.visibility = 'PUBLIC'
           and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
           and ($2::text is null or q.quest_type::text = $2)
@@ -412,8 +476,12 @@ pub async fn list_quests(
             or q.description ilike '%' || $3 || '%'
             or u.username ilike '%' || $3 || '%'
             or u.display_name ilike '%' || $3 || '%'
+            or q.location_name ilike '%' || $3 || '%'
           )
-        order by q.published_at desc nulls last, q.created_at desc
+          and ($5::double precision is null or distance.distance_km <= $7)
+        order by distance.distance_km asc nulls last,
+                 q.published_at desc nulls last,
+                 q.created_at desc
         limit $1
         "#,
     )
@@ -421,6 +489,9 @@ pub async fn list_quests(
     .bind(quest_type)
     .bind(search)
     .bind(viewer.map(|user| user.id))
+    .bind(latitude)
+    .bind(longitude)
+    .bind(radius_km)
     .fetch_all(&state.database)
     .await
     .map_err(|_| QuestError::Database)?;
@@ -609,15 +680,16 @@ pub async fn create_quest(
     let created_id = sqlx::query_scalar::<_, Uuid>(
         r#"
         insert into public.quests (
-          creator_id, title, description, cover_media_url, quest_type, visibility,
+          creator_id, title, description, cover_media_url,
+          location_name, latitude, longitude, quest_type, visibility,
           is_group_challenge, required_group_size, max_entries, winner_count,
           winner_selection_method, proof_requirements, judging_criteria,
           reward_enabled, reward_amount_minor, reward_currency, settlement_asset, deadline
         )
         values (
-          $1, $2, $3, $4, $5::quest_type, $6::quest_visibility,
-          $7, $8, $9, $10, $11::winner_selection_method, $12, $13,
-          $14, $15, $16, $17, $18
+          $1, $2, $3, $4, $5, $6, $7, $8::quest_type, $9::quest_visibility,
+          $10, $11, $12, $13, $14::winner_selection_method, $15, $16,
+          $17, $18, $19, $20, $21
         )
         returning id
         "#,
@@ -626,6 +698,9 @@ pub async fn create_quest(
     .bind(quest.title.trim())
     .bind(quest.description.trim())
     .bind(quest.cover_media_url.as_deref().map(str::trim))
+    .bind(quest.location_name.as_deref().map(str::trim))
+    .bind(quest.latitude)
+    .bind(quest.longitude)
     .bind(quest.quest_type.as_str())
     .bind(quest.visibility.as_str())
     .bind(quest.is_group_challenge)
@@ -933,6 +1008,10 @@ async fn find_quest(
                q.title,
                q.description,
                q.cover_media_url,
+               q.location_name,
+               q.latitude,
+               q.longitude,
+               null::double precision as distance_km,
                q.quest_type::text as quest_type,
                q.visibility::text as visibility,
                q.is_group_challenge,
@@ -1000,6 +1079,9 @@ mod tests {
             title: "Weekend photo walk".to_string(),
             description: "Photograph your favourite local landmark.".to_string(),
             cover_media_url: None,
+            location_name: None,
+            latitude: None,
+            longitude: None,
             quest_type: "EXPLORE".to_string(),
             visibility: "PUBLIC".to_string(),
             is_group_challenge: false,
@@ -1064,6 +1146,41 @@ mod tests {
     }
 
     #[test]
+    fn accepts_complete_explore_location_and_rejects_partial_coordinates() {
+        let mut quest = valid_quest();
+        quest.proof_requirements.push("LOCATION".to_string());
+        quest.location_name = Some("Freedom Park, Lagos".to_string());
+        quest.latitude = Some(6.4491);
+        quest.longitude = Some(3.3958);
+        assert!(quest.validate().is_ok());
+
+        quest.longitude = None;
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
+    fn validates_nearby_discovery_coordinates_and_radius() {
+        let valid = QuestListQuery {
+            limit: None,
+            search: None,
+            quest_type: Some("EXPLORE".to_string()),
+            latitude: Some(6.5244),
+            longitude: Some(3.3792),
+            radius_km: Some(25.0),
+        };
+        let (latitude, longitude, radius) = valid.nearby().unwrap().unwrap();
+        assert!((latitude - 6.5244).abs() < f64::EPSILON);
+        assert!((longitude - 3.3792).abs() < f64::EPSILON);
+        assert!((radius - 25.0).abs() < f64::EPSILON);
+
+        let partial = QuestListQuery {
+            longitude: None,
+            ..valid
+        };
+        assert!(matches!(partial.nearby(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
     fn requires_criteria_for_judged_quests() {
         let mut quest = valid_quest();
         quest.winner_selection_method = WinnerSelectionMethod::BestSubmission;
@@ -1103,6 +1220,9 @@ mod tests {
             limit: None,
             search: Some("  sunset walk  ".to_string()),
             quest_type: Some("explore".to_string()),
+            latitude: None,
+            longitude: None,
+            radius_km: None,
         };
         assert_eq!(
             query.normalized_search().unwrap().as_deref(),
@@ -1120,6 +1240,9 @@ mod tests {
             limit: None,
             search: None,
             quest_type: Some("jobs".to_string()),
+            latitude: None,
+            longitude: None,
+            radius_km: None,
         };
         assert!(matches!(
             invalid_type.normalized_quest_type(),
@@ -1130,6 +1253,9 @@ mod tests {
             limit: None,
             search: Some("x".repeat(81)),
             quest_type: None,
+            latitude: None,
+            longitude: None,
+            radius_km: None,
         };
         assert!(matches!(
             long_search.normalized_search(),

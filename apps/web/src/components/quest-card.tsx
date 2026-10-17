@@ -1,4 +1,4 @@
-import { Clock3, Trophy } from "lucide-react";
+import { Clock3, MapPin, Trophy } from "lucide-react";
 import Link from "next/link";
 
 type QuestCardProps = {
@@ -10,9 +10,11 @@ type QuestCardProps = {
   reward?: string;
   entries: string;
   deadline: string;
+  location?: string | null;
+  distanceKm?: number | null;
 };
 
-export function QuestCard({ href, imageClass, imageUrl, title, creator, reward, entries, deadline }: QuestCardProps) {
+export function QuestCard({ href, imageClass, imageUrl, title, creator, reward, entries, deadline, location, distanceKm }: QuestCardProps) {
   return (
     <Link href={href} className="group block overflow-hidden rounded-[1.15rem] border border-line bg-surface shadow-[0_14px_42px_rgba(24,27,24,0.06)] transition hover:-translate-y-1 hover:shadow-[0_18px_56px_rgba(24,27,24,0.12)]">
       <div className={`${imageClass} h-44 bg-cover bg-center p-4 text-white`} style={imageUrl ? { backgroundImage: `linear-gradient(rgba(23,25,23,.12),rgba(23,25,23,.72)),url(${JSON.stringify(imageUrl)})` } : undefined}>
@@ -23,6 +25,7 @@ export function QuestCard({ href, imageClass, imageUrl, title, creator, reward, 
       </div>
       <div className="p-4">
         <p className="text-sm text-muted">by {creator}</p>
+        {location ? <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-muted"><MapPin size={13} aria-hidden="true" />{location}{distanceKm !== null && distanceKm !== undefined ? ` · ${distanceKm < 1 ? "<1" : distanceKm.toFixed(1)} km` : ""}</p> : null}
         <div className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold text-foreground">
           <span className="flex items-center gap-1.5"><Trophy size={14} aria-hidden="true" /> {entries}</span>
           <span className="flex items-center gap-1.5 text-muted"><Clock3 size={14} aria-hidden="true" /> {deadline}</span>

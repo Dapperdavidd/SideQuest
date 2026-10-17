@@ -38,11 +38,19 @@ export default function CreateQuestPage() {
   const [publishedQuest, setPublishedQuest] = useState<Quest | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [locationName, setLocationName] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
   const detailsValid = title.trim().length >= 3 && Boolean(description.trim()) && deadlineValid;
+  const locationReady = locationName.trim().length >= 2 && latitude !== null && longitude !== null;
+  const locationRequired = proof.includes("Location");
 
   function toggleProof(value: string) {
+    if (value === "Location") setQuestType("Explore");
     setProof((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
   }
 
@@ -50,6 +58,27 @@ export default function CreateQuestPage() {
     if (coverPreview) URL.revokeObjectURL(coverPreview);
     setCoverFile(file);
     setCoverPreview(file ? URL.createObjectURL(file) : null);
+  }
+
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setLocationError("Location is not available in this browser.");
+      return;
+    }
+    setLocating(true);
+    setLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setLatitude(coords.latitude);
+        setLongitude(coords.longitude);
+        setLocating(false);
+      },
+      () => {
+        setLocationError("Allow location access, then try again.");
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 12_000 },
+    );
   }
 
   async function next() {
@@ -95,6 +124,9 @@ export default function CreateQuestPage() {
           title: title.trim(),
           description: description.trim(),
           cover_media_url: coverMediaUrl,
+          location_name: questType === "Explore" && locationReady ? locationName.trim() : null,
+          latitude: questType === "Explore" && locationReady ? latitude : null,
+          longitude: questType === "Explore" && locationReady ? longitude : null,
           quest_type: questType.toUpperCase(),
           visibility,
           is_group_challenge: isGroup,
@@ -166,9 +198,10 @@ export default function CreateQuestPage() {
                 <label className="mt-5 block text-sm font-bold">Submission deadline<span className="mt-2 flex items-center gap-3 rounded-xl border border-line bg-background px-4"><CalendarDays size={18} className="text-muted" /><input type="datetime-local" value={deadline} onChange={(event) => { const value = event.target.value; setDeadline(value); setDeadlineValid(new Date(value).getTime() > Date.now()); }} className="w-full bg-transparent py-3 font-normal outline-none" /></span><span className="mt-2 block text-xs font-normal text-muted">Deadlines use your current timezone and cannot be changed after entries begin.</span></label>
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
                   {(["Friends", "Bounty", "Explore"] as QuestType[]).map((type) => (
-                    <button key={type} onClick={() => setQuestType(type)} className={`rounded-xl border p-4 text-left ${questType === type ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-display font-bold">{type}</span><span className="mt-1 block text-xs leading-5 text-muted">{type === "Friends" ? "Challenge your circle" : type === "Bounty" ? "Offer a small reward" : "Create a real-world mission"}</span></button>
+                    <button key={type} onClick={() => { setQuestType(type); if (type !== "Explore") setProof((current) => current.filter((item) => item !== "Location")); }} className={`rounded-xl border p-4 text-left ${questType === type ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}><span className="font-display font-bold">{type}</span><span className="mt-1 block text-xs leading-5 text-muted">{type === "Friends" ? "Challenge your circle" : type === "Bounty" ? "Offer a small reward" : "Create a real-world mission"}</span></button>
                   ))}
                 </div>
+                {questType === "Explore" ? <div className="mt-5 rounded-xl border border-line bg-background p-4"><label className="block text-sm font-bold">Quest location <span className="font-normal text-muted">{locationRequired ? "(required for location proof)" : "(optional)"}</span><input value={locationName} onChange={(event) => setLocationName(event.target.value)} maxLength={120} className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Freedom Park, Lagos" /></label><div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={useCurrentLocation} disabled={locating} className="flex items-center gap-2 rounded-full border border-dark/20 bg-white px-4 py-2 text-sm font-bold disabled:opacity-50">{locating ? <LoaderCircle size={16} className="animate-spin" /> : <MapPin size={16} />}{locating ? "Getting location…" : latitude === null ? "Use current location" : "Update coordinates"}</button>{latitude !== null && longitude !== null ? <span className="text-xs font-semibold text-muted">Coordinates added</span> : null}</div>{locationError ? <p role="alert" className="mt-3 text-xs text-[#8f2e1e]">{locationError}</p> : null}<p className="mt-3 text-xs leading-5 text-muted">Participants see the place name. Coordinates power nearby discovery; they are supporting context, not automatic proof.</p></div> : null}
                 <label className="mt-5 flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-dashed border-muted/50 bg-cover bg-center py-5 text-sm font-semibold text-muted" style={coverPreview ? { backgroundImage: `linear-gradient(rgba(23,25,23,.55),rgba(23,25,23,.55)),url(${JSON.stringify(coverPreview)})`, color: "white" } : undefined}><ImagePlus size={19} /> {coverFile ? "Change cover image" : "Add a cover image"}<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => chooseCover(event.target.files?.[0] ?? null)} /></label>
               </div>
             ) : null}
@@ -184,7 +217,7 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 2 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 3 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">How do they prove it?</h1><p className="mt-2 text-sm text-muted">Choose one or more evidence types.</p><div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3">{["Photo", "Video", "Link", "Text", "QR checkpoint", "Location"].map((value) => <button key={value} onClick={() => toggleProof(value)} className={`rounded-xl border p-4 text-left text-sm font-bold ${proof.includes(value) ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}>{proof.includes(value) ? <Check size={16} className="mb-4" /> : <MapPin size={16} className="mb-4 text-muted" />}{value}</button>)}</div></div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 3 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">How do they prove it?</h1><p className="mt-2 text-sm text-muted">Choose one or more evidence types.</p><div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3">{["Photo", "Video", "Link", "Text", "QR checkpoint", "Location"].map((value) => <button key={value} onClick={() => toggleProof(value)} className={`rounded-xl border p-4 text-left text-sm font-bold ${proof.includes(value) ? "border-[#9bc800] bg-accent-soft" : "border-line"}`}>{proof.includes(value) ? <Check size={16} className="mb-4" /> : <MapPin size={16} className="mb-4 text-muted" />}{value}</button>)}</div>{locationRequired && !locationReady ? <p className="mt-4 rounded-xl bg-[#fff7df] p-3 text-sm text-[#72500a]">Location proof needs a place name and coordinates. Go back to the Quest step and use the location control.</p> : null}</div>
             ) : null}
 
             {step === 3 ? (
@@ -196,12 +229,12 @@ export default function CreateQuestPage() {
             ) : null}
 
             {step === 5 ? (
-              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 6 of 6</p><h1 className="mt-3 font-display text-3xl font-bold">Ready to publish?</h1><div className="mt-7 divide-y divide-line rounded-xl border border-line">{[["Quest", title || "Untitled quest"], ["Type", questType], ["Access", visibility === "PUBLIC" ? "Public" : "Invitation link only"], ...(questType === "Explore" ? [["Location", locationReady ? locationName.trim() : "Not set"]] : []), ["Deadline", deadline ? new Date(deadline).toLocaleString() : "Not set"], ["Participation", isGroup ? `Group of ${groupSize}` : "Individual"], ["Entries", `${maxEntries} maximum`], ["Winners", `${winners} · ${selectionMethod}`], ["Proof", proof.join(", ") || "None selected"], ["Reward", rewardEnabled ? `${rewardAmount} NIM each · ${totalFunding} NIM total` : "Just for fun"]].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-6 px-4 py-4"><span className="text-sm text-muted">{label}</span><span className="text-right text-sm font-bold">{value}</span></div>)}</div>{rewardEnabled ? <div className="mt-5 rounded-xl bg-[#fff7df] p-4 text-sm leading-6 text-[#72500a]">This quest will enter Awaiting Funding. It will not appear as funded or open until settlement is verified.</div> : null}{publishedQuest?.status === "AWAITING_FUNDING" ? <><div className="mt-5 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent"><Check size={16} /></span><p className="text-sm leading-6"><strong>Your draft is saved.</strong><br />The NIM reward pool must be funded and verified before this quest can open.</p></div><FundingPanel questId={publishedQuest.id} /></> : null}{publishError ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{publishError}</p> : null}</div>
             ) : null}
 
             <div className="mt-9 flex items-center justify-between border-t border-line pt-5">
               <button disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))} className="flex items-center gap-2 rounded-full px-4 py-3 text-sm font-bold disabled:opacity-30"><ArrowLeft size={17} /> Back</button>
-              <button onClick={next} disabled={publishing || (step === 0 && !detailsValid) || (step === 2 && proof.length === 0) || (step === 3 && selectionMethod === "Best submission" && judgingCriteria.trim().length < 3) || Boolean(publishedQuest)} className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{publishing ? <><LoaderCircle size={17} className="animate-spin" /> Publishing…</> : step === 5 ? (rewardEnabled ? "Save and continue to funding" : "Publish quest") : "Continue"}{!publishing ? <ArrowRight size={17} /> : null}</button>
+              <button onClick={next} disabled={publishing || (step === 0 && !detailsValid) || (step === 2 && (proof.length === 0 || (locationRequired && !locationReady))) || (step === 3 && selectionMethod === "Best submission" && judgingCriteria.trim().length < 3) || (step === 5 && locationRequired && !locationReady) || Boolean(publishedQuest)} className="flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{publishing ? <><LoaderCircle size={17} className="animate-spin" /> Publishing…</> : step === 5 ? (rewardEnabled ? "Save and continue to funding" : "Publish quest") : "Continue"}{!publishing ? <ArrowRight size={17} /> : null}</button>
             </div>
           </div>
         </section>
