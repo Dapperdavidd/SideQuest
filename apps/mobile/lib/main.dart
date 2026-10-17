@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -51,6 +52,28 @@ Future<void> main() async {
 
 Session? get currentSession =>
     supabaseConfigured ? Supabase.instance.client.auth.currentSession : null;
+
+Future<Position> currentDevicePosition({
+  LocationAccuracy accuracy = LocationAccuracy.medium,
+}) async {
+  if (!await Geolocator.isLocationServiceEnabled()) {
+    throw const LocationServiceDisabledException();
+  }
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+  if (permission == LocationPermission.denied ||
+      permission == LocationPermission.deniedForever) {
+    throw const PermissionDeniedException('Location permission was denied.');
+  }
+  return Geolocator.getCurrentPosition(
+    locationSettings: LocationSettings(
+      accuracy: accuracy,
+      timeLimit: const Duration(seconds: 12),
+    ),
+  );
+}
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
   if (!supabaseConfigured) return const Stream.empty();
@@ -197,6 +220,10 @@ class Quest {
     this.viewerJoined = false,
     this.winnerSelectionMethod = 'FIRST_VALID',
     this.coverMediaUrl,
+    this.locationName,
+    this.latitude,
+    this.longitude,
+    this.distanceKm,
   });
 
   factory Quest.fromJson(Map<String, dynamic> json) => Quest(
@@ -223,6 +250,10 @@ class Quest {
     winnerSelectionMethod:
         json['winner_selection_method'] as String? ?? 'FIRST_VALID',
     coverMediaUrl: json['cover_media_url'] as String?,
+    locationName: json['location_name'] as String?,
+    latitude: (json['latitude'] as num?)?.toDouble(),
+    longitude: (json['longitude'] as num?)?.toDouble(),
+    distanceKm: (json['distance_km'] as num?)?.toDouble(),
   );
 
   final String id;
@@ -246,6 +277,10 @@ class Quest {
   final bool viewerJoined;
   final String winnerSelectionMethod;
   final String? coverMediaUrl;
+  final String? locationName;
+  final double? latitude;
+  final double? longitude;
+  final double? distanceKm;
 
   String get image =>
       coverMediaUrl ??
@@ -399,10 +434,18 @@ class QuestRepository {
 
   final Dio _dio;
 
-  Future<List<Quest>> listQuests() async {
+  Future<List<Quest>> listQuests({double? latitude, double? longitude}) async {
     final session = currentSession;
     final response = await _dio.get<List<dynamic>>(
       '/quests',
+      queryParameters: latitude == null || longitude == null
+          ? null
+          : {
+              'quest_type': 'EXPLORE',
+              'latitude': latitude,
+              'longitude': longitude,
+              'radius_km': 25,
+            },
       options: session == null
           ? null
           : Options(
@@ -1096,6 +1139,15 @@ final questRepositoryProvider = Provider<QuestRepository>(
 final questsProvider = FutureProvider.autoDispose<List<Quest>>(
   (ref) => ref.watch(questRepositoryProvider).listQuests(),
 );
+final nearbyQuestsProvider = FutureProvider.autoDispose
+    .family<List<Quest>, ({double latitude, double longitude})>(
+      (ref, location) => ref
+          .watch(questRepositoryProvider)
+          .listQuests(
+            latitude: location.latitude,
+            longitude: location.longitude,
+          ),
+    );
 final questProvider = FutureProvider.autoDispose.family<Quest, String>(
   (ref, id) => ref.watch(questRepositoryProvider).getQuest(id),
 );
@@ -1566,10 +1618,52 @@ class DiscoverScreen extends ConsumerStatefulWidget {
 
 class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   int selectedFilter = 0;
+  Position? nearbyPosition;
+  bool locatingNearby = false;
+
+  Future<void> toggleNearby() async {
+    if (nearbyPosition != null) {
+      setState(() {
+        nearbyPosition = null;
+        selectedFilter = 3;
+      });
+      return;
+    }
+    setState(() => locatingNearby = true);
+    try {
+      final position = await currentDevicePosition();
+      if (mounted) {
+        setState(() {
+          nearbyPosition = position;
+          selectedFilter = 3;
+        });
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Allow location access to find Explore quests within 25 km.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => locatingNearby = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final asyncQuests = ref.watch(questsProvider);
+    final position = nearbyPosition;
+    final asyncQuests = position == null
+        ? ref.watch(questsProvider)
+        : ref.watch(
+            nearbyQuestsProvider((
+              latitude: double.parse(position.latitude.toStringAsFixed(3)),
+              longitude: double.parse(position.longitude.toStringAsFixed(3)),
+            )),
+          );
     ref.watch(authStateProvider);
     final session = currentSession;
     final unreadNotifications = session == null
@@ -1674,14 +1768,48 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 child: ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   scrollDirection: Axis.horizontal,
-                  itemCount: 4,
+                  itemCount: 5,
                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (context, index) {
+                    if (index == 4) {
+                      return FilterChip(
+                        selected: nearbyPosition != null,
+                        onSelected: locatingNearby
+                            ? null
+                            : (_) => toggleNearby(),
+                        avatar: locatingNearby
+                            ? const SizedBox.square(
+                                dimension: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                nearbyPosition == null
+                                    ? Icons.near_me_outlined
+                                    : Icons.close_rounded,
+                                size: 17,
+                              ),
+                        label: Text(
+                          locatingNearby ? 'Finding you…' : 'Nearby · 25 km',
+                        ),
+                        selectedColor: accent,
+                        backgroundColor: Colors.white,
+                        side: const BorderSide(color: line),
+                        labelStyle: const TextStyle(
+                          color: ink,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      );
+                    }
                     final labels = ['All', 'Friends', 'Bounties', 'Explore'];
                     final selected = selectedFilter == index;
                     return ChoiceChip(
                       selected: selected,
-                      onSelected: (_) => setState(() => selectedFilter = index),
+                      onSelected: (_) => setState(() {
+                        nearbyPosition = null;
+                        selectedFilter = index;
+                      }),
                       showCheckmark: false,
                       label: Text(labels[index]),
                       selectedColor: ink,
@@ -1711,7 +1839,23 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                   },
                   loading: () => const _QuestFeedLoading(),
                   error: (_, _) => _QuestFeedError(
-                    onRetry: () => ref.invalidate(questsProvider),
+                    onRetry: () {
+                      final location = nearbyPosition;
+                      if (location == null) {
+                        ref.invalidate(questsProvider);
+                      } else {
+                        ref.invalidate(
+                          nearbyQuestsProvider((
+                            latitude: double.parse(
+                              location.latitude.toStringAsFixed(3),
+                            ),
+                            longitude: double.parse(
+                              location.longitude.toStringAsFixed(3),
+                            ),
+                          )),
+                        );
+                      }
+                    },
                   ),
                 ),
               ),
@@ -1953,6 +2097,31 @@ class _FeaturedQuest extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: Colors.white70),
               ),
+              if (quest.locationName != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      color: Colors.white70,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        '${quest.locationName}${quest.distanceKm == null ? '' : ' · ${quest.distanceKm! < 1 ? '<1' : quest.distanceKm!.toStringAsFixed(1)} km'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 14),
               Text(
                 '${quest.rewardLabel}  ·  ${quest.entriesReceived}/${quest.maxEntries} entries  ·  ${quest.winnerCount} winner${quest.winnerCount == 1 ? '' : 's'}',
@@ -2019,6 +2188,19 @@ class _QuestRow extends StatelessWidget {
                     'by ${quest.creator}',
                     style: const TextStyle(color: muted, fontSize: 12),
                   ),
+                  if (quest.locationName != null) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      '${quest.locationName}${quest.distanceKm == null ? '' : ' · ${quest.distanceKm! < 1 ? '<1' : quest.distanceKm!.toStringAsFixed(1)} km'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   Text(
                     '${quest.rewardLabel} · ${quest.entriesReceived}/${quest.maxEntries} entries · ${quest.timeLeft}',
@@ -2229,6 +2411,45 @@ class _QuestDetail extends ConsumerWidget {
                   quest.description,
                   style: const TextStyle(color: muted, height: 1.55),
                 ),
+                if (quest.locationName != null) ...[
+                  const SizedBox(height: 18),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF2FFD0),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.location_on_outlined, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                quest.locationName!,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              const Text(
+                                'Location is supporting context, not automatic proof.',
+                                style: TextStyle(
+                                  color: muted,
+                                  fontSize: 11,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 Row(
                   children: [
@@ -4645,6 +4866,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   final descriptionController = TextEditingController();
   final criteriaController = TextEditingController();
   final rewardController = TextEditingController(text: '10');
+  final locationController = TextEditingController();
   int step = 0;
   String questType = 'FRIENDS';
   String visibility = 'PUBLIC';
@@ -4659,6 +4881,8 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   bool publishing = false;
   String? errorMessage;
   XFile? coverFile;
+  Position? questPosition;
+  bool locatingQuest = false;
 
   @override
   void dispose() {
@@ -4666,6 +4890,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     descriptionController.dispose();
     criteriaController.dispose();
     rewardController.dispose();
+    locationController.dispose();
     super.dispose();
   }
 
@@ -4674,12 +4899,17 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       titleController.text.trim().length >= 3 &&
           descriptionController.text.trim().isNotEmpty &&
           deadline.isAfter(DateTime.now()),
-    1 => proofRequirements.isNotEmpty,
+    1 =>
+      proofRequirements.isNotEmpty &&
+          (!proofRequirements.contains('LOCATION') || locationReady),
     2 =>
       selectionMethod == 'FIRST_VALID' ||
           criteriaController.text.trim().length >= 3,
     _ => true,
   };
+
+  bool get locationReady =>
+      locationController.text.trim().length >= 2 && questPosition != null;
 
   Future<void> chooseDeadline() async {
     final date = await showDatePicker(
@@ -4712,6 +4942,27 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       maxWidth: 2400,
     );
     if (image != null && mounted) setState(() => coverFile = image);
+  }
+
+  Future<void> useQuestLocation() async {
+    setState(() {
+      locatingQuest = true;
+      errorMessage = null;
+    });
+    try {
+      final position = await currentDevicePosition(
+        accuracy: LocationAccuracy.high,
+      );
+      if (mounted) setState(() => questPosition = position);
+    } on Object {
+      if (mounted) {
+        setState(() {
+          errorMessage = 'Allow location access and turn on Location Services to add this place.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => locatingQuest = false);
+    }
   }
 
   Future<void> publish() async {
@@ -4765,6 +5016,15 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'title': titleController.text.trim(),
         'description': descriptionController.text.trim(),
         'cover_media_url': coverMediaUrl,
+        'location_name': questType == 'EXPLORE' && locationReady
+            ? locationController.text.trim()
+            : null,
+        'latitude': questType == 'EXPLORE' && locationReady
+            ? questPosition!.latitude
+            : null,
+        'longitude': questType == 'EXPLORE' && locationReady
+            ? questPosition!.longitude
+            : null,
         'quest_type': questType,
         'visibility': visibility,
         'is_group_challenge': isGroup,
@@ -5041,8 +5301,73 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           ButtonSegment(value: 'EXPLORE', label: Text('Explore')),
         ],
         selected: {questType},
-        onSelectionChanged: (value) => setState(() => questType = value.first),
+        onSelectionChanged: (value) => setState(() {
+          questType = value.first;
+          if (questType != 'EXPLORE') {
+            proofRequirements.remove('LOCATION');
+          }
+        }),
       ),
+      if (questType == 'EXPLORE') ...[
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: line),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: locationController,
+                maxLength: 120,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Quest location (optional)',
+                  hintText: 'Freedom Park, Lagos',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 6),
+              OutlinedButton.icon(
+                onPressed: locatingQuest ? null : useQuestLocation,
+                icon: locatingQuest
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location_rounded),
+                label: Text(
+                  locatingQuest
+                      ? 'Getting location…'
+                      : questPosition == null
+                      ? 'Use current location'
+                      : 'Update coordinates',
+                ),
+              ),
+              if (questPosition != null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Coordinates added for nearby discovery.',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              const Text(
+                'Participants see the place name. Location supports review but does not prove completion by itself.',
+                style: TextStyle(color: muted, fontSize: 11, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+      ],
       const SizedBox(height: 18),
       InkWell(
         onTap: chooseCover,
@@ -5204,12 +5529,27 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
                       proofRequirements.remove(entry.key);
                     } else {
                       proofRequirements.add(entry.key);
+                      if (entry.key == 'LOCATION') questType = 'EXPLORE';
                     }
                   }),
                 );
               })
               .toList(growable: false),
         ),
+        if (proofRequirements.contains('LOCATION') && !locationReady) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7DF),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Text(
+              'Location proof needs a place name and coordinates. Go back to the Quest step and add both.',
+              style: TextStyle(color: Color(0xFF72500A), height: 1.4),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -5301,6 +5641,11 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
     final rows = <(String, String)>[
       ('Quest', titleController.text.trim()),
       ('Type', questType.toLowerCase()),
+      if (questType == 'EXPLORE')
+        (
+          'Location',
+          locationReady ? locationController.text.trim() : 'Not set',
+        ),
       ('Access', visibility == 'PUBLIC' ? 'public' : 'invitation link only'),
       ('Deadline', _shortDate(deadline)),
       ('Participation', isGroup ? 'Group of $groupSize' : 'Individual'),
