@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod auth;
 pub mod checkpoints;
 pub mod entries;
@@ -14,6 +15,7 @@ use actix_web::{HttpResponse, Responder, get, web};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
+use std::collections::HashSet;
 
 use crate::auth::AuthVerifier;
 
@@ -38,6 +40,7 @@ pub struct AppState {
     pub auth: AuthVerifier,
     pub payments: Option<PaymentConfig>,
     pub payout_signer: Option<PayoutSignerConfig>,
+    pub admin_user_ids: HashSet<uuid::Uuid>,
 }
 
 #[derive(Serialize)]
@@ -78,6 +81,10 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(organizations::list_organization_quests)
             .service(organizations::update_organization)
             .service(organizations::get_organization_analytics)
+            .service(admin::list_reports)
+            .service(admin::update_report)
+            .service(admin::list_pending_organizations)
+            .service(admin::update_organization_verification)
             .service(quests::list_quests)
             .service(quests::list_my_quests)
             .service(quests::list_saved_quests)

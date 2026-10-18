@@ -52,7 +52,7 @@ export type AppNotification = {
   id: string;
   actor_id: string | null;
   quest_id: string | null;
-  kind: "NEW_FOLLOWER" | "QUEST_JOINED" | "ENTRY_SUBMITTED" | "ENTRY_APPROVED" | "ENTRY_REJECTED" | "QUEST_WON" | "QUEST_FINALIZED" | "PAYOUT_CONFIRMED" | "PAYOUT_FAILED";
+  kind: "NEW_FOLLOWER" | "QUEST_JOINED" | "ENTRY_SUBMITTED" | "ENTRY_APPROVED" | "ENTRY_REJECTED" | "QUEST_WON" | "QUEST_FINALIZED" | "PAYOUT_CONFIRMED" | "PAYOUT_FAILED" | "BUSINESS_VERIFIED" | "BUSINESS_REJECTED";
   title: string;
   body: string;
   href: string;
@@ -87,6 +87,7 @@ export type Organization = {
   website_url: string | null;
   logo_url: string | null;
   verification_status: "PENDING" | "VERIFIED" | "REJECTED";
+  verification_reason: string | null;
   verified_at: string | null;
   created_at: string;
 };

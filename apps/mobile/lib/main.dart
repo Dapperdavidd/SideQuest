@@ -378,6 +378,7 @@ class Organization {
     required this.description,
     required this.websiteUrl,
     required this.verificationStatus,
+    required this.verificationReason,
   });
 
   factory Organization.fromJson(Map<String, dynamic> json) => Organization(
@@ -387,6 +388,7 @@ class Organization {
     description: json['description'] as String?,
     websiteUrl: json['website_url'] as String?,
     verificationStatus: json['verification_status'] as String,
+    verificationReason: json['verification_reason'] as String?,
   );
 
   final String id;
@@ -395,6 +397,7 @@ class Organization {
   final String? description;
   final String? websiteUrl;
   final String verificationStatus;
+  final String? verificationReason;
 }
 
 class QuestInvitation {
@@ -4035,6 +4038,7 @@ IconData _notificationIcon(String kind) => switch (kind) {
   'NEW_FOLLOWER' => Icons.person_add_alt_1_rounded,
   'QUEST_WON' => Icons.emoji_events_rounded,
   'PAYOUT_CONFIRMED' || 'PAYOUT_FAILED' => Icons.account_balance_wallet_rounded,
+  'BUSINESS_VERIFIED' || 'BUSINESS_REJECTED' => Icons.business_rounded,
   'ENTRY_APPROVED' => Icons.check_circle_rounded,
   'ENTRY_REJECTED' => Icons.rule_rounded,
   _ => Icons.notifications_rounded,
@@ -9159,6 +9163,21 @@ class _BusinessProfileSectionState
                         Text(
                           organization.description!,
                           style: const TextStyle(color: muted, height: 1.45),
+                        ),
+                      ],
+                      if (organization.verificationReason != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: background,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Decision note: ${organization.verificationReason}',
+                            style: const TextStyle(color: muted, fontSize: 12),
+                          ),
                         ),
                       ],
                       const SizedBox(height: 18),

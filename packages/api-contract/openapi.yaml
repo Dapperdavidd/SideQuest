@@ -1054,6 +1054,113 @@ paths:
           description: An active report already exists for this target
         "422":
           description: Report input is invalid
+  /admin/reports:
+    get:
+      summary: List reports in an administrator-selected moderation state
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [OPEN, REVIEWING, RESOLVED, DISMISSED]
+            default: OPEN
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Authorized moderation queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminReport"
+        "403":
+          description: The authenticated user is not an administrator
+  /admin/reports/{reportId}:
+    patch:
+      summary: Move a report through review with an immutable audit record
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: reportId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportDecision"
+      responses:
+        "204":
+          description: Moderation status updated
+        "403":
+          description: The authenticated user is not an administrator
+        "404":
+          description: Report not found
+        "422":
+          description: Invalid status or decision note
+  /admin/organizations:
+    get:
+      summary: List business profiles by verification status for administrators
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [PENDING, VERIFIED, REJECTED]
+            default: PENDING
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Authorized business-verification queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminOrganization"
+        "403":
+          description: The authenticated user is not an administrator
+  /admin/organizations/{organizationId}/verification:
+    patch:
+      summary: Verify or reject a business profile with an immutable audit record
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationDecision"
+      responses:
+        "204":
+          description: Business verification status updated and owner notified
+        "403":
+          description: The authenticated user is not an administrator
+        "404":
+          description: Business profile not found
+        "422":
+          description: Invalid verification decision or reason
 components:
   parameters:
     QuestId:
@@ -1123,6 +1230,10 @@ components:
             verification_status:
               type: string
               enum: [PENDING, VERIFIED, REJECTED]
+            verification_reason:
+              type: [string, "null"]
+              minLength: 3
+              maxLength: 500
             verified_at:
               type: [string, "null"]
               format: date-time
@@ -1273,6 +1384,59 @@ components:
         created_at:
           type: string
           format: date-time
+    AdminReport:
+      allOf:
+        - $ref: "#/components/schemas/ContentReport"
+        - type: object
+          required: [reporter_username, reporter_display_name]
+          properties:
+            reporter_username:
+              type: string
+            reporter_display_name:
+              type: string
+            quest_title:
+              type: [string, "null"]
+            user_username:
+              type: [string, "null"]
+            user_display_name:
+              type: [string, "null"]
+            resolution_note:
+              type: [string, "null"]
+            reviewed_at:
+              type: [string, "null"]
+              format: date-time
+    ReportDecision:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [REVIEWING, RESOLVED, DISMISSED]
+        note:
+          type: [string, "null"]
+          minLength: 3
+          maxLength: 500
+          description: Required when resolving or dismissing a report.
+    AdminOrganization:
+      allOf:
+        - $ref: "#/components/schemas/Organization"
+        - type: object
+          required: [owner_display_name]
+          properties:
+            owner_display_name:
+              type: string
+    OrganizationDecision:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [VERIFIED, REJECTED]
+        reason:
+          type: [string, "null"]
+          minLength: 3
+          maxLength: 500
+          description: Required when rejecting a business profile.
     PayoutDestination:
       type: object
       required: [network, address, updated_at]
@@ -1707,7 +1871,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [NEW_FOLLOWER, QUEST_JOINED, ENTRY_SUBMITTED, ENTRY_APPROVED, ENTRY_REJECTED, QUEST_WON, QUEST_FINALIZED, PAYOUT_CONFIRMED, PAYOUT_FAILED]
+          enum: [NEW_FOLLOWER, QUEST_JOINED, ENTRY_SUBMITTED, ENTRY_APPROVED, ENTRY_REJECTED, QUEST_WON, QUEST_FINALIZED, PAYOUT_CONFIRMED, PAYOUT_FAILED, BUSINESS_VERIFIED, BUSINESS_REJECTED]
         title:
           type: string
         body:

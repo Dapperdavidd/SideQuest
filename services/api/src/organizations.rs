@@ -20,6 +20,7 @@ pub struct Organization {
     website_url: Option<String>,
     logo_url: Option<String>,
     verification_status: String,
+    verification_reason: Option<String>,
     verified_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
 }
@@ -146,7 +147,8 @@ async fn find_organization(
         select organization.id, organization.owner_id, owner.username as owner_username,
                organization.slug, organization.display_name, organization.description,
                organization.website_url, organization.logo_url,
-               organization.verification_status, organization.verified_at,
+               organization.verification_status, organization.verification_reason,
+               organization.verified_at,
                organization.created_at
         from public.organizations organization
         join public.users owner on owner.id = organization.owner_id
@@ -298,7 +300,10 @@ pub async fn update_organization(
         r#"
         update public.organizations
         set slug = $3, display_name = $4, description = $5,
-            website_url = $6, logo_url = $7, updated_at = now()
+            website_url = $6, logo_url = $7,
+            verification_status = 'PENDING', verified_at = null,
+            reviewed_by = null, verification_reason = null,
+            updated_at = now()
         where id = $1 and owner_id = $2
         returning slug
         "#,

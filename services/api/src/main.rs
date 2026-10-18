@@ -7,6 +7,8 @@ use api::{
     payments::run_payout_worker, quests::run_deadline_worker,
 };
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashSet;
+use uuid::Uuid;
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
@@ -55,6 +57,7 @@ async fn main() -> io::Result<()> {
         auth: AuthVerifier::new(jwks_url),
         payments,
         payout_signer,
+        admin_user_ids: admin_user_ids_from_environment(),
     };
     let payout_worker_state = state.clone();
     actix_web::rt::spawn(async move { run_payout_worker(payout_worker_state).await });
@@ -73,6 +76,26 @@ async fn main() -> io::Result<()> {
     .bind((host, port))?
     .run()
     .await
+}
+
+fn admin_user_ids_from_environment() -> HashSet<Uuid> {
+    std::env::var("SIDEQUEST_ADMIN_USER_IDS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|value| {
+            let value = value.trim();
+            if value.is_empty() {
+                return None;
+            }
+            match Uuid::parse_str(value) {
+                Ok(id) => Some(id),
+                Err(_) => {
+                    tracing::warn!("ignoring an invalid SIDEQUEST_ADMIN_USER_IDS entry");
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 fn payout_signer_config_from_environment() -> Option<PayoutSignerConfig> {
