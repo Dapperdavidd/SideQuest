@@ -70,6 +70,11 @@ Run the API:
 cargo run --manifest-path services/api/Cargo.toml
 ```
 
+The API exposes two operational checks outside the versioned API prefix:
+
+- `GET /health` confirms that the HTTP process is running.
+- `GET /ready` confirms that the database and every configured payment dependency are reachable. It returns `503 Service Unavailable` until the service is safe to receive application traffic.
+
 Run the mobile app:
 
 ```bash
@@ -97,6 +102,8 @@ The same formatting, test, analysis, lint, and production-build checks run autom
 Copy the root `.env.example` for the API and `apps/web/.env.example` to `apps/web/.env.local` for the Next.js client. Provide a Supabase project URL and publishable key to activate email, Google, and Apple authentication. Provider dashboards must include the local and production callback URLs. Apple activation additionally requires Apple Developer identifiers and signing credentials.
 
 `DATABASE_MAX_CONNECTIONS` defaults to five, which leaves headroom for migrations and dashboard access on Supabase's smaller session pools. Increase it only alongside the database or pooler's connection allowance.
+
+`API_ALLOWED_ORIGINS` is a comma-separated allowlist for browser origins. It defaults to `http://localhost:3000`; set the deployed web origin explicitly before production traffic. Invalid values and wildcards are rejected rather than enabling permissive cross-origin access.
 
 Wallet access is optional. The web app remains usable in a normal browser and detects Nimiq Pay at runtime before requesting wallet capabilities.
 

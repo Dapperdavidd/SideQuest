@@ -16,6 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
 use std::collections::HashSet;
+use std::time::Duration as StdDuration;
 
 use crate::auth::AuthVerifier;
 
@@ -50,6 +51,16 @@ struct HealthResponse {
     timestamp: DateTime<Utc>,
 }
 
+#[derive(Serialize)]
+struct ReadinessResponse {
+    status: &'static str,
+    service: &'static str,
+    timestamp: DateTime<Utc>,
+    database: &'static str,
+    funding_verifier: &'static str,
+    payout_signer: &'static str,
+}
+
 #[get("/health")]
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(HealthResponse {
@@ -59,8 +70,61 @@ async fn health() -> impl Responder {
     })
 }
 
+#[get("/ready")]
+async fn ready(state: web::Data<AppState>) -> impl Responder {
+    let database = sqlx::query_scalar::<_, i32>("select 1").fetch_one(&state.database);
+    let verifier = dependency_status(
+        state
+            .payments
+            .as_ref()
+            .map(|config| config.verifier_url.as_str()),
+    );
+    let signer = dependency_status(
+        state
+            .payout_signer
+            .as_ref()
+            .map(|config| config.url.as_str()),
+    );
+    let (database, funding_verifier, payout_signer) = tokio::join!(database, verifier, signer);
+    let database_ok = database.is_ok();
+    let dependencies_ok = funding_verifier != "unavailable" && payout_signer != "unavailable";
+    let response = ReadinessResponse {
+        status: if database_ok && dependencies_ok {
+            "ready"
+        } else {
+            "not_ready"
+        },
+        service: "sidequest-api",
+        timestamp: Utc::now(),
+        database: if database_ok { "ok" } else { "unavailable" },
+        funding_verifier,
+        payout_signer,
+    };
+    if database_ok && dependencies_ok {
+        HttpResponse::Ok().json(response)
+    } else {
+        HttpResponse::ServiceUnavailable().json(response)
+    }
+}
+
+async fn dependency_status(base_url: Option<&str>) -> &'static str {
+    let Some(base_url) = base_url else {
+        return "disabled";
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(StdDuration::from_secs(3))
+        .build()
+    else {
+        return "unavailable";
+    };
+    match client.get(format!("{base_url}/health")).send().await {
+        Ok(response) if response.status().is_success() => "ok",
+        _ => "unavailable",
+    }
+}
+
 pub fn configure_routes(config: &mut web::ServiceConfig) {
-    config.service(health).service(
+    config.service(health).service(ready).service(
         web::scope("/api/v1")
             .service(profiles::get_me)
             .service(profiles::get_creator_analytics)

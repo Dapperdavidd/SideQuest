@@ -1,7 +1,7 @@
 use std::io;
 
 use actix_cors::Cors;
-use actix_web::{App, HttpServer, middleware::Logger, web};
+use actix_web::{App, HttpServer, http::header, middleware::Logger, web};
 use api::{
     AppState, PaymentConfig, PayoutSignerConfig, auth::AuthVerifier, configure_routes,
     payments::run_payout_worker, quests::run_deadline_worker,
@@ -25,6 +25,7 @@ async fn main() -> io::Result<()> {
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(8080);
+    let allowed_origins = allowed_origins_from_environment();
     let database_url = std::env::var("DATABASE_URL").map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -68,10 +69,17 @@ async fn main() -> io::Result<()> {
     };
     let server_state = state.clone();
     let server = HttpServer::new(move || {
+        let cors = allowed_origins.iter().fold(
+            Cors::default()
+                .allowed_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+                .allowed_headers(vec![header::AUTHORIZATION, header::CONTENT_TYPE])
+                .max_age(3600),
+            |cors, origin| cors.allowed_origin(origin),
+        );
         App::new()
             .app_data(web::Data::new(server_state.clone()))
             .wrap(Logger::default())
-            .wrap(Cors::permissive())
+            .wrap(cors)
             .configure(configure_routes)
     })
     .bind((host.as_str(), port))?
@@ -90,6 +98,48 @@ async fn main() -> io::Result<()> {
     deadline_worker.abort();
     shutdown_database.close().await;
     server_result
+}
+
+fn allowed_origins_from_environment() -> Vec<String> {
+    parse_allowed_origins(
+        &std::env::var("API_ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string()),
+    )
+}
+
+fn parse_allowed_origins(value: &str) -> Vec<String> {
+    let origins = value
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| origin.starts_with("http://") || origin.starts_with("https://"))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if origins.is_empty() {
+        vec!["http://localhost:3000".to_string()]
+    } else {
+        origins
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_allowed_origins;
+
+    #[test]
+    fn accepts_only_explicit_http_origins() {
+        assert_eq!(
+            parse_allowed_origins("https://sidequest.app, http://localhost:3000, *"),
+            vec!["https://sidequest.app", "http://localhost:3000"]
+        );
+    }
+
+    #[test]
+    fn empty_or_invalid_origin_configuration_fails_to_localhost() {
+        assert_eq!(
+            parse_allowed_origins("javascript:alert(1),*"),
+            vec!["http://localhost:3000"]
+        );
+    }
 }
 
 fn admin_user_ids_from_environment() -> HashSet<Uuid> {
