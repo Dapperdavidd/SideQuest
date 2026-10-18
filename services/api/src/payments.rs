@@ -1067,6 +1067,7 @@ pub async fn retry_failed_payout(
             transaction_hash = null,
             submitted_at = null,
             confirmed_at = null,
+            dispatch_started_at = null,
             failure_reason = null,
             updated_at = now()
         where id = $1 and status = 'FAILED'
@@ -1140,29 +1141,31 @@ async fn dispatch_next_payout(
     payment_config: &crate::PaymentConfig,
     signer_config: &crate::PayoutSignerConfig,
 ) -> Result<bool, PayoutWorkerError> {
-    let mut transaction = state
-        .database
-        .begin()
-        .await
-        .map_err(|_| PayoutWorkerError::Database)?;
     let payout = sqlx::query_as::<_, PendingPayout>(
         r#"
-        select id, amount_minor as amount_luna, destination_address, idempotency_key
-        from public.payouts
-        where status = 'PENDING'
-        order by created_at, id
-        for update skip locked
-        limit 1
+        with candidate as (
+          select id
+          from public.payouts
+          where status = 'PENDING'
+            and (dispatch_started_at is null or dispatch_started_at < now() - interval '2 minutes')
+          order by created_at, id
+          for update skip locked
+          limit 1
+        )
+        update public.payouts payout
+        set dispatch_started_at = now(), updated_at = now()
+        from candidate
+        where payout.id = candidate.id
+        returning payout.id,
+                  payout.amount_minor as amount_luna,
+                  payout.destination_address,
+                  payout.idempotency_key
         "#,
     )
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&state.database)
     .await
     .map_err(|_| PayoutWorkerError::Database)?;
     let Some(payout) = payout else {
-        transaction
-            .rollback()
-            .await
-            .map_err(|_| PayoutWorkerError::Database)?;
         return Ok(false);
     };
     let reference = payout_reference(payout.id);
@@ -1192,13 +1195,14 @@ async fn dispatch_next_payout(
         .map_err(|_| PayoutWorkerError::SignerUnavailable)?;
     verify_signer_receipt(&receipt, &payout, payment_config, &reference)?;
 
-    sqlx::query(
+    let updated = sqlx::query(
         r#"
         update public.payouts
         set status = 'SUBMITTED',
             provider_reference = $2,
             transaction_hash = $3,
             submitted_at = coalesce(submitted_at, now()),
+            dispatch_started_at = null,
             failure_reason = null,
             updated_at = now()
         where id = $1 and status = 'PENDING'
@@ -1207,13 +1211,12 @@ async fn dispatch_next_payout(
     .bind(payout.id)
     .bind(&receipt.idempotency_key)
     .bind(&receipt.transaction_hash)
-    .execute(&mut *transaction)
+    .execute(&state.database)
     .await
     .map_err(|_| PayoutWorkerError::Database)?;
-    transaction
-        .commit()
-        .await
-        .map_err(|_| PayoutWorkerError::Database)?;
+    if updated.rows_affected() != 1 {
+        return Err(PayoutWorkerError::Database);
+    }
     tracing::info!(payout_id = %payout.id, transaction_hash = %receipt.transaction_hash, "NIM payout submitted");
     Ok(true)
 }

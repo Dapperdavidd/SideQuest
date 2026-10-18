@@ -37,8 +37,13 @@ async fn main() -> io::Result<()> {
             "SUPABASE_JWKS_URL must be configured",
         )
     })?;
+    let database_max_connections = std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(5)
+        .clamp(1, 20);
     let database = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(database_max_connections)
         .connect(&database_url)
         .await
         .map_err(io::Error::other)?;
@@ -61,25 +66,30 @@ async fn main() -> io::Result<()> {
         payout_signer,
         admin_user_ids: admin_user_ids_from_environment(),
     };
-    let payout_worker_state = state.clone();
-    actix_web::rt::spawn(async move { run_payout_worker(payout_worker_state).await });
-    let deadline_worker_state = state.clone();
-    actix_web::rt::spawn(async move { run_deadline_worker(deadline_worker_state).await });
-
-    tracing::info!(%host, %port, "starting SideQuest API");
-
-    HttpServer::new(move || {
+    let server_state = state.clone();
+    let server = HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(state.clone()))
+            .app_data(web::Data::new(server_state.clone()))
             .wrap(Logger::default())
             .wrap(Cors::permissive())
             .configure(configure_routes)
     })
-    .bind((host, port))?
-    .run()
-    .await?;
+    .bind((host.as_str(), port))?
+    .run();
+    let payout_worker_state = state.clone();
+    let payout_worker =
+        actix_web::rt::spawn(async move { run_payout_worker(payout_worker_state).await });
+    let deadline_worker_state = state.clone();
+    let deadline_worker =
+        actix_web::rt::spawn(async move { run_deadline_worker(deadline_worker_state).await });
+
+    tracing::info!(%host, %port, database_max_connections, "starting SideQuest API");
+
+    let server_result = server.await;
+    payout_worker.abort();
+    deadline_worker.abort();
     shutdown_database.close().await;
-    Ok(())
+    server_result
 }
 
 fn admin_user_ids_from_environment() -> HashSet<Uuid> {

@@ -96,6 +96,8 @@ The same formatting, test, analysis, lint, and production-build checks run autom
 
 Copy the root `.env.example` for the API and `apps/web/.env.example` to `apps/web/.env.local` for the Next.js client. Provide a Supabase project URL and publishable key to activate email, Google, and Apple authentication. Provider dashboards must include the local and production callback URLs. Apple activation additionally requires Apple Developer identifiers and signing credentials.
 
+`DATABASE_MAX_CONNECTIONS` defaults to five, which leaves headroom for migrations and dashboard access on Supabase's smaller session pools. Increase it only alongside the database or pooler's connection allowance.
+
 Wallet access is optional. The web app remains usable in a normal browser and detects Nimiq Pay at runtime before requesting wallet capabilities.
 
 Monetary quests remain `AWAITING_FUNDING` until the API independently verifies the exact Nimiq Pay transaction through the TestAlbatross verifier. Client wallet success alone never opens a quest or records a payout. Automatic winner payouts remain disabled until the isolated signer is configured. See [verified reward funding readiness](docs/payment-readiness.md) for the full security model.
