@@ -52,7 +52,7 @@ export type AppNotification = {
   id: string;
   actor_id: string | null;
   quest_id: string | null;
-  kind: "NEW_FOLLOWER" | "QUEST_JOINED" | "ENTRY_SUBMITTED" | "ENTRY_APPROVED" | "ENTRY_REJECTED" | "QUEST_WON" | "QUEST_FINALIZED" | "PAYOUT_CONFIRMED" | "PAYOUT_FAILED" | "BUSINESS_VERIFIED" | "BUSINESS_REJECTED";
+  kind: "NEW_FOLLOWER" | "QUEST_JOINED" | "ENTRY_SUBMITTED" | "ENTRY_APPROVED" | "ENTRY_REJECTED" | "QUEST_WON" | "QUEST_FINALIZED" | "QUEST_SUSPENDED" | "QUEST_REINSTATED" | "PAYOUT_CONFIRMED" | "PAYOUT_FAILED" | "BUSINESS_VERIFIED" | "BUSINESS_REJECTED";
   title: string;
   body: string;
   href: string;

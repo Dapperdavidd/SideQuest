@@ -1198,6 +1198,58 @@ paths:
           description: Payout is not failed, attempts are exhausted, or the prior transaction is not independently terminal
         "503":
           description: Nimiq verification or payout storage is unavailable
+  /admin/quests/suspended:
+    get:
+      summary: List active administrator quest suspensions
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Active quest suspensions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SuspendedQuest"
+        "403":
+          description: The authenticated user is not an administrator
+  /admin/quests/{questId}/suspend:
+    patch:
+      summary: Suspend a non-terminal quest and block discovery and submissions
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestEnforcementDecision"
+      responses:
+        "204":
+          description: Quest suspended and creator notified
+        "409":
+          description: Quest is already suspended or terminal
+  /admin/quests/{questId}/reinstate:
+    patch:
+      summary: Reinstate a suspended quest to its safe prior lifecycle state
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestEnforcementDecision"
+      responses:
+        "204":
+          description: Quest reinstated and creator notified
+        "409":
+          description: Quest has no active suspension
 components:
   parameters:
     QuestId:
@@ -1506,6 +1558,37 @@ components:
           minimum: 1
           maximum: 3
         updated_at:
+          type: string
+          format: date-time
+    QuestEnforcementDecision:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+    SuspendedQuest:
+      type: object
+      required: [suspension_id, quest_id, title, creator_username, creator_display_name, previous_status, reason, suspended_at]
+      properties:
+        suspension_id:
+          type: string
+          format: uuid
+        quest_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        creator_username:
+          type: string
+        creator_display_name:
+          type: string
+        previous_status:
+          type: string
+        reason:
+          type: string
+        suspended_at:
           type: string
           format: date-time
     PayoutDestination:
@@ -1942,7 +2025,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [NEW_FOLLOWER, QUEST_JOINED, ENTRY_SUBMITTED, ENTRY_APPROVED, ENTRY_REJECTED, QUEST_WON, QUEST_FINALIZED, PAYOUT_CONFIRMED, PAYOUT_FAILED, BUSINESS_VERIFIED, BUSINESS_REJECTED]
+          enum: [NEW_FOLLOWER, QUEST_JOINED, ENTRY_SUBMITTED, ENTRY_APPROVED, ENTRY_REJECTED, QUEST_WON, QUEST_FINALIZED, QUEST_SUSPENDED, QUEST_REINSTATED, PAYOUT_CONFIRMED, PAYOUT_FAILED, BUSINESS_VERIFIED, BUSINESS_REJECTED]
         title:
           type: string
         body:

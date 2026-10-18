@@ -146,6 +146,23 @@ struct StoredFailedPayout {
     updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct QuestEnforcementDecision {
+    reason: String,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct SuspendedQuest {
+    suspension_id: Uuid,
+    quest_id: Uuid,
+    title: String,
+    creator_username: String,
+    creator_display_name: String,
+    previous_status: String,
+    reason: String,
+    suspended_at: DateTime<Utc>,
+}
+
 async fn authenticate_admin(request: &HttpRequest, state: &AppState) -> Result<Uuid, AdminError> {
     let user = state.auth.authenticate(request).await?;
     if !state.admin_user_ids.contains(&user.id) {
@@ -481,6 +498,155 @@ pub async fn retry_payout(
             | PayoutRetryError::VerifierUnavailable
             | PayoutRetryError::Database => AdminError::Database,
         })?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[get("/admin/quests/suspended")]
+pub async fn list_suspended_quests(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<Vec<SuspendedQuest>>, AdminError> {
+    authenticate_admin(&request, &state).await?;
+    let quests = sqlx::query_as::<_, SuspendedQuest>(
+        r#"
+        select suspension.id as suspension_id, quest.id as quest_id, quest.title,
+               creator.username as creator_username,
+               creator.display_name as creator_display_name,
+               suspension.previous_status::text as previous_status,
+               suspension.reason, suspension.suspended_at
+        from public.quest_suspensions suspension
+        join public.quests quest on quest.id = suspension.quest_id
+        join public.users creator on creator.id = quest.creator_id
+        where suspension.reinstated_at is null and quest.status = 'SUSPENDED'
+        order by suspension.suspended_at, suspension.id
+        limit 100
+        "#,
+    )
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| AdminError::Database)?;
+    Ok(web::Json(quests))
+}
+
+#[patch("/admin/quests/{quest_id}/suspend")]
+pub async fn suspend_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+    decision: web::Json<QuestEnforcementDecision>,
+) -> Result<HttpResponse, AdminError> {
+    let moderator_id = authenticate_admin(&request, &state).await?;
+    let reason = decision.reason.trim();
+    if !valid_note(Some(reason)) {
+        return Err(AdminError::Invalid);
+    }
+    let quest_id = quest_id.into_inner();
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    let quest = sqlx::query(
+        "select creator_id, title, status::text as status from public.quests where id = $1 for update",
+    )
+    .bind(quest_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| AdminError::Database)?
+    .ok_or(AdminError::NotFound)?;
+    let status: String = quest.try_get("status").map_err(|_| AdminError::Database)?;
+    if matches!(status.as_str(), "SUSPENDED" | "FINALIZED" | "CANCELLED") {
+        return Err(AdminError::Conflict);
+    }
+    let creator_id: Uuid = quest
+        .try_get("creator_id")
+        .map_err(|_| AdminError::Database)?;
+    let title: String = quest.try_get("title").map_err(|_| AdminError::Database)?;
+    sqlx::query("insert into public.quest_suspensions (quest_id, moderator_id, previous_status, reason) values ($1, $2, $3::quest_status, $4)")
+        .bind(quest_id).bind(moderator_id).bind(&status).bind(reason)
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    sqlx::query("update public.quests set status = 'SUSPENDED', updated_at = now() where id = $1")
+        .bind(quest_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AdminError::Database)?;
+    sqlx::query("insert into public.notifications (user_id, actor_id, quest_id, kind, title, body, href) values ($1, $2, $3, 'QUEST_SUSPENDED', 'Quest suspended', $4, '/quests/' || $3::text)")
+        .bind(creator_id).bind(moderator_id).bind(quest_id)
+        .bind(format!("“{title}” was suspended while SideQuest reviews a safety concern."))
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[patch("/admin/quests/{quest_id}/reinstate")]
+pub async fn reinstate_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+    decision: web::Json<QuestEnforcementDecision>,
+) -> Result<HttpResponse, AdminError> {
+    let moderator_id = authenticate_admin(&request, &state).await?;
+    let note = decision.reason.trim();
+    if !valid_note(Some(note)) {
+        return Err(AdminError::Invalid);
+    }
+    let quest_id = quest_id.into_inner();
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    let suspension = sqlx::query(
+        r#"
+        select suspension.id, suspension.previous_status::text as previous_status,
+               quest.creator_id, quest.title, quest.deadline
+        from public.quest_suspensions suspension
+        join public.quests quest on quest.id = suspension.quest_id
+        where suspension.quest_id = $1 and suspension.reinstated_at is null
+          and quest.status = 'SUSPENDED'
+        for update of suspension, quest
+        "#,
+    )
+    .bind(quest_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| AdminError::Database)?
+    .ok_or(AdminError::Conflict)?;
+    let suspension_id: Uuid = suspension.try_get("id").map_err(|_| AdminError::Database)?;
+    let previous_status: String = suspension
+        .try_get("previous_status")
+        .map_err(|_| AdminError::Database)?;
+    let deadline: DateTime<Utc> = suspension
+        .try_get("deadline")
+        .map_err(|_| AdminError::Database)?;
+    let restored_status = if previous_status == "OPEN" && deadline <= Utc::now() {
+        "CLOSED_FOR_REVIEW"
+    } else {
+        previous_status.as_str()
+    };
+    let creator_id: Uuid = suspension
+        .try_get("creator_id")
+        .map_err(|_| AdminError::Database)?;
+    let title: String = suspension
+        .try_get("title")
+        .map_err(|_| AdminError::Database)?;
+    sqlx::query("update public.quest_suspensions set reinstated_by = $2, reinstated_at = now(), reinstatement_note = $3 where id = $1 and reinstated_at is null")
+        .bind(suspension_id).bind(moderator_id).bind(note)
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    sqlx::query("update public.quests set status = $2::quest_status, updated_at = now() where id = $1 and status = 'SUSPENDED'")
+        .bind(quest_id).bind(restored_status)
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    sqlx::query("insert into public.notifications (user_id, actor_id, quest_id, kind, title, body, href) values ($1, $2, $3, 'QUEST_REINSTATED', 'Quest reinstated', $4, '/quests/' || $3::text)")
+        .bind(creator_id).bind(moderator_id).bind(quest_id)
+        .bind(format!("“{title}” was reinstated after review."))
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| AdminError::Database)?;
     Ok(HttpResponse::NoContent().finish())
 }
 

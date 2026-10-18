@@ -4039,6 +4039,7 @@ IconData _notificationIcon(String kind) => switch (kind) {
   'QUEST_WON' => Icons.emoji_events_rounded,
   'PAYOUT_CONFIRMED' || 'PAYOUT_FAILED' => Icons.account_balance_wallet_rounded,
   'BUSINESS_VERIFIED' || 'BUSINESS_REJECTED' => Icons.business_rounded,
+  'QUEST_SUSPENDED' || 'QUEST_REINSTATED' => Icons.gavel_rounded,
   'ENTRY_APPROVED' => Icons.check_circle_rounded,
   'ENTRY_REJECTED' => Icons.rule_rounded,
   _ => Icons.notifications_rounded,
