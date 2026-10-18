@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:io';
 
@@ -4164,7 +4165,16 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
   bool submitting = false;
   bool submitted = false;
   bool closedForReview = false;
+  bool draftReady = false;
   String? errorMessage;
+
+  String get draftKey => 'sidequest_entry_draft_${widget.questId}';
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreDraft();
+  }
 
   @override
   void dispose() {
@@ -4177,6 +4187,55 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
 
   TextEditingController controllerFor(String proof) =>
       valueControllers.putIfAbsent(proof, () => TextEditingController());
+
+  Future<void> _restoreDraft() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final encoded = preferences.getString(draftKey);
+      if (encoded != null) {
+        final decoded = jsonDecode(encoded);
+        if (decoded is Map<String, dynamic>) {
+          captionController.text = decoded['caption'] as String? ?? '';
+          final values = decoded['values'];
+          if (values is Map<String, dynamic>) {
+            for (final entry in values.entries) {
+              final value = entry.value;
+              if (value is String) controllerFor(entry.key).text = value;
+            }
+          }
+        }
+      }
+    } on Object {
+      try {
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.remove(draftKey);
+      } on Object {
+        // Submission remains available when device storage is unavailable.
+      }
+    } finally {
+      draftReady = true;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _saveDraft() async {
+    if (!draftReady || submitted) return;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        draftKey,
+        jsonEncode({
+          'caption': captionController.text,
+          'values': {
+            for (final entry in valueControllers.entries)
+              entry.key: entry.value.text,
+          },
+        }),
+      );
+    } on Object {
+      // Submission remains available when device storage is unavailable.
+    }
+  }
 
   Future<void> pickMedia(String proof, ImageSource source) async {
     final file = proof == 'PHOTO'
@@ -4307,6 +4366,12 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
       ref.invalidate(questProvider(quest.id));
       ref.invalidate(questsProvider);
       ref.invalidate(myQuestsProvider);
+      try {
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.remove(draftKey);
+      } on Object {
+        // Do not report an accepted server entry as failed if draft cleanup fails.
+      }
       if (mounted) {
         setState(() {
           submitted = true;
@@ -4477,6 +4542,11 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
                 'Every requirement must be included. Official entries cannot be edited or deleted.',
                 style: TextStyle(color: muted, height: 1.45),
               ),
+              const SizedBox(height: 6),
+              const Text(
+                'Caption and written proof are saved on this device. Media must be selected again after restarting the app.',
+                style: TextStyle(color: muted, fontSize: 12, height: 1.4),
+              ),
               if (quest.proofRequirements.contains('QR_CHECKPOINT')) ...[
                 const SizedBox(height: 14),
                 const _CheckpointNotice(
@@ -4497,12 +4567,16 @@ class _SubmissionScreenState extends ConsumerState<SubmissionScreen> {
                   onPick: proof == 'PHOTO' || proof == 'VIDEO'
                       ? () => chooseMedia(proof)
                       : null,
-                  onChanged: () => setState(() => errorMessage = null),
+                  onChanged: () {
+                    setState(() => errorMessage = null);
+                    _saveDraft();
+                  },
                 ),
                 const SizedBox(height: 12),
               ],
               TextField(
                 controller: captionController,
+                onChanged: (_) => _saveDraft(),
                 maxLength: 280,
                 minLines: 3,
                 maxLines: 5,

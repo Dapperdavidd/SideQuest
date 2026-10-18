@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, FileUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -21,7 +21,50 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
   const manualProofRequirements = quest.proof_requirements.filter((proofType) => proofType !== "QR_CHECKPOINT");
+  const draftKey = `sidequest:entry-draft:${quest.id}`;
+
+  useEffect(() => {
+    let active = true;
+    try {
+      const stored = window.localStorage.getItem(draftKey);
+      if (stored) {
+        const draft = JSON.parse(stored) as { caption?: string; values?: Record<string, string> };
+        queueMicrotask(() => {
+          if (!active) return;
+          setCaption(draft.caption ?? "");
+          setValues(draft.values ?? {});
+          setDraftReady(true);
+        });
+      } else {
+        queueMicrotask(() => {
+          if (active) setDraftReady(true);
+        });
+      }
+    } catch {
+      try {
+        window.localStorage.removeItem(draftKey);
+      } catch {
+        // Submission still works when browser storage is unavailable.
+      }
+      queueMicrotask(() => {
+        if (active) setDraftReady(true);
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftReady || submitted) return;
+    try {
+      window.localStorage.setItem(draftKey, JSON.stringify({ caption, values }));
+    } catch {
+      // Submission still works when browser storage is unavailable.
+    }
+  }, [caption, draftKey, draftReady, submitted, values]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,6 +112,11 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
         body: JSON.stringify({ caption: caption.trim() || null, evidence }),
       });
       if (!response.ok) throw new Error(await readApiError(response, "Your entry could not be accepted."));
+      try {
+        window.localStorage.removeItem(draftKey);
+      } catch {
+        // The accepted server entry must not be reported as failed if storage cleanup is blocked.
+      }
       setSubmitted(true);
     } catch (caught) {
       if (uploadedPaths.length) await supabase.storage.from("entry-media").remove(uploadedPaths);
@@ -89,6 +137,7 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">Official entry</p>
       <h1 className="mt-3 font-display text-3xl font-bold">Submit your proof</h1>
       <p className="mt-2 text-sm leading-6 text-muted">Once accepted, this consumes one of {quest.max_entries} entry slots and cannot be deleted.</p>
+      <p className="mt-2 text-xs leading-5 text-muted">Caption and written proof are saved on this device. Media must be selected again after a refresh.</p>
 
       {quest.proof_requirements.includes("QR_CHECKPOINT") ? <div className="mt-6 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><Check size={18} className="mt-0.5 shrink-0" /><p className="text-sm leading-6"><strong>Checkpoint progress is verified automatically.</strong><br /><span className="text-muted">Complete every stop on the quest page before sending this entry.</span></p></div> : null}
 
