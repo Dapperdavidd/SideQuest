@@ -7,7 +7,11 @@ use sqlx::{FromRow, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{AppState, auth::AuthError, payments::format_luna};
+use crate::{
+    AppState,
+    auth::AuthError,
+    payments::{format_luna, is_valid_nimiq_address},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewedEntry {
@@ -82,6 +86,19 @@ fn validate_winner_count(winner_count: u8) -> Result<(), FinalizationError> {
     Ok(())
 }
 
+fn unused_reward_luna(
+    reward_per_winner_luna: i64,
+    configured_winners: u8,
+    actual_winners: usize,
+) -> Option<i64> {
+    let unused_positions =
+        i64::from(configured_winners).checked_sub(i64::try_from(actual_winners).ok()?)?;
+    if unused_positions < 0 {
+        return None;
+    }
+    reward_per_winner_luna.checked_mul(unused_positions)
+}
+
 #[derive(Debug, Serialize, FromRow)]
 pub struct CreatorEntry {
     id: Uuid,
@@ -138,6 +155,7 @@ pub struct QuestSettlement {
     total_allocated_luna: i64,
     total_allocated_nim: String,
     payouts: Vec<CreatorPayout>,
+    refund: Option<CreatorRefund>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,6 +212,59 @@ impl StoredCreatorPayout {
             created_at: self.created_at,
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreatorRefund {
+    id: Uuid,
+    amount_luna: i64,
+    amount_nim: String,
+    network: String,
+    destination_address: String,
+    status: String,
+    transaction_hash: Option<String>,
+    submitted_at: Option<DateTime<Utc>>,
+    confirmed_at: Option<DateTime<Utc>>,
+    failure_reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredCreatorRefund {
+    id: Uuid,
+    amount_luna: i64,
+    network: String,
+    destination_address: String,
+    status: String,
+    transaction_hash: Option<String>,
+    submitted_at: Option<DateTime<Utc>>,
+    confirmed_at: Option<DateTime<Utc>>,
+    failure_reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+impl StoredCreatorRefund {
+    fn into_response(self) -> CreatorRefund {
+        CreatorRefund {
+            id: self.id,
+            amount_luna: self.amount_luna,
+            amount_nim: format_luna(self.amount_luna),
+            network: self.network,
+            destination_address: self.destination_address,
+            status: self.status,
+            transaction_hash: self.transaction_hash,
+            submitted_at: self.submitted_at,
+            confirmed_at: self.confirmed_at,
+            failure_reason: self.failure_reason,
+            created_at: self.created_at,
+        }
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct RewardPoolContext {
+    id: Uuid,
+    refund_address: String,
 }
 
 #[derive(Debug, Error)]
@@ -452,6 +523,28 @@ pub async fn get_quest_settlement(
         .into_iter()
         .map(StoredCreatorPayout::into_response)
         .collect();
+    let refund = sqlx::query_as::<_, StoredCreatorRefund>(
+        r#"
+        select p.id,
+               p.amount_minor as amount_luna,
+               p.network,
+               p.destination_address,
+               p.status::text as status,
+               p.transaction_hash,
+               p.submitted_at,
+               p.confirmed_at,
+               p.failure_reason,
+               p.created_at
+        from public.payouts p
+        join public.reward_pools pool on pool.id = p.reward_pool_id
+        where pool.quest_id = $1 and p.payout_kind = 'CREATOR_REFUND'
+        "#,
+    )
+    .bind(quest_id)
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| ReviewError::Database)?
+    .map(StoredCreatorRefund::into_response);
 
     Ok(web::Json(QuestSettlement {
         quest_id,
@@ -462,6 +555,7 @@ pub async fn get_quest_settlement(
         total_allocated_luna,
         total_allocated_nim: format_luna(total_allocated_luna),
         payouts,
+        refund,
     }))
 }
 
@@ -609,7 +703,7 @@ pub async fn finalize_quest(
     let settlement_asset: Option<String> = quest
         .try_get("settlement_asset")
         .map_err(|_| ReviewError::Database)?;
-    let reward_pool_id = if reward_enabled {
+    let reward_pool = if reward_enabled {
         if reward_amount_minor.is_none()
             || reward_currency.as_deref() != Some("NIM")
             || settlement_asset.as_deref() != Some("NIM")
@@ -617,8 +711,19 @@ pub async fn finalize_quest(
             return Err(ReviewError::FundingNotReady);
         }
         Some(
-            sqlx::query_scalar::<_, Uuid>(
-                "select id from public.reward_pools where quest_id = $1 and funded_at is not null for update",
+            sqlx::query_as::<_, RewardPoolContext>(
+                r#"
+                select pool.id, transaction.raw_receipt ->> 'sender' as refund_address
+                from public.reward_pools pool
+                join public.payment_intents intent
+                  on intent.reward_pool_id = pool.id and intent.status = 'CONFIRMED'
+                join public.payment_transactions transaction
+                  on transaction.payment_intent_id = intent.id and transaction.verified_at is not null
+                where pool.quest_id = $1 and pool.funded_at is not null
+                order by transaction.created_at desc
+                limit 1
+                for update of pool
+                "#,
             )
             .bind(quest_id)
             .fetch_optional(&mut *transaction)
@@ -641,7 +746,7 @@ pub async fn finalize_quest(
         .await
         .map_err(|_| ReviewError::Database)?;
 
-        if let Some(reward_pool_id) = reward_pool_id {
+        if let Some(reward_pool) = &reward_pool {
             let recipient = sqlx::query(
                 r#"
                 select participant_id, payout_destination_address
@@ -672,7 +777,7 @@ pub async fn finalize_quest(
                 returning id
                 "#,
             )
-            .bind(reward_pool_id)
+            .bind(reward_pool.id)
             .bind(winner_id)
             .bind(recipient_id)
             .bind(amount_luna)
@@ -694,6 +799,37 @@ pub async fn finalize_quest(
             .bind(amount_luna)
             .bind(destination_address)
             .bind(format!("payout:{quest_id}:{winner_id}"))
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| ReviewError::Database)?;
+        }
+    }
+    if let Some(reward_pool) = &reward_pool {
+        let refund_luna = unused_reward_luna(
+            reward_amount_minor.ok_or(ReviewError::FundingNotReady)?,
+            winner_count as u8,
+            winners.len(),
+        )
+        .ok_or(ReviewError::Database)?;
+        if refund_luna > 0 {
+            if !is_valid_nimiq_address(&reward_pool.refund_address) {
+                return Err(ReviewError::FundingNotReady);
+            }
+            sqlx::query(
+                r#"
+                insert into public.payouts (
+                  reward_allocation_id, reward_pool_id, payout_kind, recipient_id,
+                  amount_minor, settlement_asset, network, destination_address,
+                  status, idempotency_key
+                )
+                values (null, $1, 'CREATOR_REFUND', $2, $3, 'NIM', 'testnet', $4, 'PENDING', $5)
+                "#,
+            )
+            .bind(reward_pool.id)
+            .bind(creator_id)
+            .bind(refund_luna)
+            .bind(&reward_pool.refund_address)
+            .bind(format!("refund:{quest_id}:{}", reward_pool.id))
             .execute(&mut *transaction)
             .await
             .map_err(|_| ReviewError::Database)?;
@@ -859,5 +995,22 @@ mod tests {
             validate_best_submission_winners(&entries, &selected, 3),
             Ok(selected)
         );
+    }
+
+    #[test]
+    fn unused_reward_returns_every_unfilled_winner_position() {
+        assert_eq!(unused_reward_luna(100_000, 3, 1), Some(200_000));
+        assert_eq!(unused_reward_luna(100_000, 3, 0), Some(300_000));
+    }
+
+    #[test]
+    fn fully_allocated_reward_has_no_refund_value() {
+        assert_eq!(unused_reward_luna(100_000, 3, 3), Some(0));
+    }
+
+    #[test]
+    fn invalid_or_overflowing_refund_math_fails_closed() {
+        assert_eq!(unused_reward_luna(100_000, 1, 2), None);
+        assert_eq!(unused_reward_luna(i64::MAX, 2, 0), None);
     }
 }

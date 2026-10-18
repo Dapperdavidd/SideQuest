@@ -14,6 +14,7 @@ SideQuest does not mark a monetary quest funded because a browser reports that a
 - The local isolated signer is implemented as a loopback-only service. It validates a bearer token, checks that its Keychain-provided private key derives the configured treasury address, serializes each signed transaction into an owner-only durable ledger before broadcast, and rejects idempotency-key reuse with changed payout details.
 - The API payout worker is enabled only when both the verified funding configuration and local signer configuration are valid. It holds a row lock while making an idempotent signer request, then independently checks signer identity, treasury sender, recipient snapshot, integer-Luna amount, payout reference, network, and transaction-hash shape before recording `SUBMITTED`.
 - Submitted payouts are read back through the separate chain verifier. `CONFIRMED` is recorded only after the verifier matches the transaction hash, treasury sender, destination, amount, `SQP:` reference, TestAlbatross network, and configured confirmation depth. Invalidated or expired transactions move to `FAILED` with a visible reason.
+- If final review produces fewer valid winners than the funded winner count, finalization calculates the unused positions in integer Luna and creates one idempotent creator refund. The destination is the original funding sender captured by independent chain verification, never a later client-supplied address. Refunds use the same isolated signer, chain verification, retry ceiling, audit archive, creator settlement view, wallet history, and status notifications as winner payouts.
 
 References:
 
@@ -58,7 +59,7 @@ USDT additionally requires an approved Polygon Amoy RPC endpoint, the exact supp
 8. Finalization creates one allocation and pending payout per winner using the destination locked with the entry. The API worker sends the isolated signer the immutable idempotency key and an `SQP:` reference derived from the payout record.
 9. The signer persists the signed transaction before broadcast, and the API validates its response before recording `SUBMITTED`.
 10. The verifier independently confirms sender, destination, amount, reference, network, hash, and depth before the API records `CONFIRMED` and the UI displays the reward as paid.
-11. Expiry, underpayment, overpayment, failed payout, refund, and reconciliation paths remain explicit states with audit records.
+11. Expiry, underpayment, overpayment, failed payout, unused-prize refund, and reconciliation paths remain explicit states with audit records. Unused funded winner positions are automatically returned to the verified original sender after finalization.
 
 ## Environment placeholders
 

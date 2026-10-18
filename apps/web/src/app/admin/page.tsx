@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { connection } from "next/server";
 import { Suspense } from "react";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/logo";
@@ -13,7 +12,6 @@ export default function AdminPage() {
 }
 
 async function AdminContent() {
-  await connection();
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) redirect("/auth?next=/admin");

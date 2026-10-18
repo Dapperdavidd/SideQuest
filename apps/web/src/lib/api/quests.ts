@@ -166,6 +166,7 @@ export type MyQuestSummary = {
 
 export type PayoutSummary = {
   id: string;
+  payout_kind: "WINNER_REWARD" | "CREATOR_REFUND";
   quest_id: string;
   quest_title: string;
   amount_luna: number;
@@ -202,6 +203,19 @@ export type QuestSettlement = {
     failure_reason: string | null;
     created_at: string;
   }>;
+  refund: null | {
+    id: string;
+    amount_luna: number;
+    amount_nim: string;
+    network: string;
+    destination_address: string;
+    status: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
+    transaction_hash: string | null;
+    submitted_at: string | null;
+    confirmed_at: string | null;
+    failure_reason: string | null;
+    created_at: string;
+  };
 };
 
 export type PublicProfile = {

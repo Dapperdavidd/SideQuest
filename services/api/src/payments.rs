@@ -211,6 +211,7 @@ pub struct PayoutDestination {
 #[derive(Debug, Serialize)]
 pub struct PayoutSummary {
     id: Uuid,
+    payout_kind: String,
     quest_id: Uuid,
     quest_title: String,
     amount_luna: i64,
@@ -228,6 +229,7 @@ pub struct PayoutSummary {
 #[derive(Debug, FromRow)]
 struct StoredPayoutSummary {
     id: Uuid,
+    payout_kind: String,
     quest_id: Uuid,
     quest_title: String,
     amount_luna: i64,
@@ -245,6 +247,7 @@ impl StoredPayoutSummary {
     fn into_response(self) -> PayoutSummary {
         PayoutSummary {
             id: self.id,
+            payout_kind: self.payout_kind,
             quest_id: self.quest_id,
             quest_title: self.quest_title,
             amount_luna: self.amount_luna,
@@ -318,6 +321,7 @@ pub async fn list_my_payouts(
     let payouts = sqlx::query_as::<_, StoredPayoutSummary>(
         r#"
         select p.id,
+               p.payout_kind,
                q.id as quest_id,
                q.title as quest_title,
                p.amount_minor as amount_luna,
@@ -330,9 +334,10 @@ pub async fn list_my_payouts(
                p.failure_reason,
                p.created_at
         from public.payouts p
-        join public.reward_allocations ra on ra.id = p.reward_allocation_id
-        join public.quest_winners qw on qw.id = ra.winner_id
-        join public.quests q on q.id = qw.quest_id
+        left join public.reward_allocations ra on ra.id = p.reward_allocation_id
+        left join public.quest_winners qw on qw.id = ra.winner_id
+        left join public.reward_pools refund_pool on refund_pool.id = p.reward_pool_id
+        join public.quests q on q.id = coalesce(qw.quest_id, refund_pool.quest_id)
         where p.recipient_id = $1
         order by p.created_at desc, p.id desc
         "#,

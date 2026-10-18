@@ -1588,11 +1588,14 @@ components:
           description: Required when rejecting a business profile.
     FailedPayout:
       type: object
-      required: [id, quest_id, quest_title, recipient_username, recipient_display_name, amount_luna, amount_nim, destination_address, transaction_hash, current_attempt, updated_at]
+      required: [id, payout_kind, quest_id, quest_title, recipient_username, recipient_display_name, amount_luna, amount_nim, destination_address, transaction_hash, current_attempt, updated_at]
       properties:
         id:
           type: string
           format: uuid
+        payout_kind:
+          type: string
+          enum: [WINNER_REWARD, CREATOR_REFUND]
         quest_id:
           type: string
           format: uuid
@@ -1687,6 +1690,7 @@ components:
       type: object
       required:
         - id
+        - payout_kind
         - quest_id
         - quest_title
         - amount_luna
@@ -1699,6 +1703,9 @@ components:
         id:
           type: string
           format: uuid
+        payout_kind:
+          type: string
+          enum: [WINNER_REWARD, CREATOR_REFUND]
         quest_id:
           type: string
           format: uuid
@@ -1740,6 +1747,7 @@ components:
         - total_allocated_luna
         - total_allocated_nim
         - payouts
+        - refund
       properties:
         quest_id:
           type: string
@@ -1757,6 +1765,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CreatorPayout"
+        refund:
+          oneOf:
+            - $ref: "#/components/schemas/CreatorRefund"
+            - type: "null"
     CreatorPayout:
       type: object
       required:
@@ -1782,6 +1794,39 @@ components:
           type: string
         recipient_display_name:
           type: string
+        amount_luna:
+          type: integer
+          minimum: 1
+        amount_nim:
+          type: string
+        network:
+          type: string
+          enum: [testnet]
+        destination_address:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, SUBMITTED, CONFIRMED, FAILED]
+        transaction_hash:
+          type: [string, "null"]
+        submitted_at:
+          type: [string, "null"]
+          format: date-time
+        confirmed_at:
+          type: [string, "null"]
+          format: date-time
+        failure_reason:
+          type: [string, "null"]
+        created_at:
+          type: string
+          format: date-time
+    CreatorRefund:
+      type: object
+      required: [id, amount_luna, amount_nim, network, destination_address, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
         amount_luna:
           type: integer
           minimum: 1

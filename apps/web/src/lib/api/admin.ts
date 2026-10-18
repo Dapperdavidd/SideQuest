@@ -36,6 +36,7 @@ export type AdminOrganization = {
 
 export type FailedPayout = {
   id: string;
+  payout_kind: "WINNER_REWARD" | "CREATOR_REFUND";
   quest_id: string;
   quest_title: string;
   recipient_username: string;

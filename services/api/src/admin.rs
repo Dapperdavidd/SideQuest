@@ -118,6 +118,7 @@ pub struct OrganizationDecision {
 #[derive(Debug, Serialize)]
 pub struct FailedPayout {
     id: Uuid,
+    payout_kind: String,
     quest_id: Uuid,
     quest_title: String,
     recipient_username: String,
@@ -134,6 +135,7 @@ pub struct FailedPayout {
 #[derive(Debug, FromRow)]
 struct StoredFailedPayout {
     id: Uuid,
+    payout_kind: String,
     quest_id: Uuid,
     quest_title: String,
     recipient_username: String,
@@ -446,6 +448,7 @@ pub async fn list_failed_payouts(
     let payouts = sqlx::query_as::<_, StoredFailedPayout>(
         r#"
         select payout.id,
+               payout.payout_kind,
                pool.quest_id,
                quest.title as quest_title,
                recipient.username as recipient_username,
@@ -457,8 +460,8 @@ pub async fn list_failed_payouts(
                payout.current_attempt,
                payout.updated_at
         from public.payouts payout
-        join public.reward_allocations allocation on allocation.id = payout.reward_allocation_id
-        join public.reward_pools pool on pool.id = allocation.reward_pool_id
+        left join public.reward_allocations allocation on allocation.id = payout.reward_allocation_id
+        join public.reward_pools pool on pool.id = coalesce(allocation.reward_pool_id, payout.reward_pool_id)
         join public.quests quest on quest.id = pool.quest_id
         join public.users recipient on recipient.id = payout.recipient_id
         where payout.status = 'FAILED'
@@ -474,6 +477,7 @@ pub async fn list_failed_payouts(
             .into_iter()
             .map(|payout| FailedPayout {
                 id: payout.id,
+                payout_kind: payout.payout_kind,
                 quest_id: payout.quest_id,
                 quest_title: payout.quest_title,
                 recipient_username: payout.recipient_username,

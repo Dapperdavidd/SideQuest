@@ -1054,6 +1054,7 @@ class PayoutDestination {
 class PayoutSummary {
   const PayoutSummary({
     required this.id,
+    required this.payoutKind,
     required this.questId,
     required this.questTitle,
     required this.amountLuna,
@@ -1068,6 +1069,7 @@ class PayoutSummary {
 
   factory PayoutSummary.fromJson(Map<String, dynamic> json) => PayoutSummary(
     id: json['id'] as String,
+    payoutKind: json['payout_kind'] as String,
     questId: json['quest_id'] as String,
     questTitle: json['quest_title'] as String,
     amountLuna: (json['amount_luna'] as num).toInt(),
@@ -1081,6 +1083,7 @@ class PayoutSummary {
   );
 
   final String id;
+  final String payoutKind;
   final String questId;
   final String questTitle;
   final int amountLuna;
@@ -1100,6 +1103,7 @@ class QuestSettlement {
     required this.rewardEnabled,
     required this.totalAllocatedNim,
     required this.payouts,
+    required this.refund,
   });
 
   factory QuestSettlement.fromJson(Map<String, dynamic> json) =>
@@ -1111,6 +1115,9 @@ class QuestSettlement {
         payouts: (json['payouts'] as List<dynamic>)
             .map((item) => CreatorPayout.fromJson(item as Map<String, dynamic>))
             .toList(growable: false),
+        refund: json['refund'] == null
+            ? null
+            : CreatorRefund.fromJson(json['refund'] as Map<String, dynamic>),
       );
 
   final String questId;
@@ -1118,6 +1125,34 @@ class QuestSettlement {
   final bool rewardEnabled;
   final String totalAllocatedNim;
   final List<CreatorPayout> payouts;
+  final CreatorRefund? refund;
+}
+
+class CreatorRefund {
+  const CreatorRefund({
+    required this.id,
+    required this.amountNim,
+    required this.destinationAddress,
+    required this.status,
+    required this.transactionHash,
+    required this.failureReason,
+  });
+
+  factory CreatorRefund.fromJson(Map<String, dynamic> json) => CreatorRefund(
+    id: json['id'] as String,
+    amountNim: json['amount_nim'] as String,
+    destinationAddress: json['destination_address'] as String,
+    status: json['status'] as String,
+    transactionHash: json['transaction_hash'] as String?,
+    failureReason: json['failure_reason'] as String?,
+  );
+
+  final String id;
+  final String amountNim;
+  final String destinationAddress;
+  final String status;
+  final String? transactionHash;
+  final String? failureReason;
 }
 
 class CreatorPayout {
@@ -7369,6 +7404,18 @@ class QuestSettlementScreen extends ConsumerWidget {
                     )
                   else
                     ...value.payouts.map(_CreatorPayoutCard.new),
+                  if (value.refund != null) ...[
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Unused reward return',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _CreatorRefundCard(value.refund!),
+                  ],
                   const SizedBox(height: 14),
                   const Text(
                     'This screen is read-only. A payout is confirmed only after independent TestAlbatross verification.',
@@ -7379,6 +7426,67 @@ class QuestSettlementScreen extends ConsumerWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _CreatorRefundCard extends StatelessWidget {
+  const _CreatorRefundCard(this.refund);
+
+  final CreatorRefund refund;
+
+  @override
+  Widget build(BuildContext context) {
+    final address = refund.destinationAddress;
+    final shortAddress = address.length > 20
+        ? '${address.substring(0, 9)}…${address.substring(address.length - 9)}'
+        : address;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: refund.status == 'CONFIRMED'
+                    ? accent
+                    : const Color(0xFFF0F1EC),
+                foregroundColor: ink,
+                child: const Icon(Icons.replay_rounded),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Returned to the original funding address',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              Text(
+                '${refund.amountNim} NIM',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '${refund.status.toLowerCase()} · $shortAddress',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+          if (refund.failureReason != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              refund.failureReason!,
+              style: const TextStyle(color: Color(0xFF8F2E1E), fontSize: 12),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -7509,7 +7617,11 @@ class WalletScreen extends ConsumerWidget {
           ),
           data: (items) {
             final confirmedLuna = items
-                .where((payout) => payout.status == 'CONFIRMED')
+                .where(
+                  (payout) =>
+                      payout.payoutKind == 'WINNER_REWARD' &&
+                      payout.status == 'CONFIRMED',
+                )
                 .fold<int>(0, (total, payout) => total + payout.amountLuna);
             return RefreshIndicator(
               color: ink,
@@ -7708,7 +7820,7 @@ class _PayoutCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  '${_month(date.month)} ${date.day}, ${date.year}',
+                  '${payout.payoutKind == 'CREATOR_REFUND' ? 'Unused reward refund · ' : 'Winner reward · '}${_month(date.month)} ${date.day}, ${date.year}',
                   style: const TextStyle(color: muted, fontSize: 11),
                 ),
                 const SizedBox(height: 12),
