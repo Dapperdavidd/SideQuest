@@ -85,6 +85,8 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(admin::update_report)
             .service(admin::list_pending_organizations)
             .service(admin::update_organization_verification)
+            .service(admin::list_failed_payouts)
+            .service(admin::retry_payout)
             .service(quests::list_quests)
             .service(quests::list_my_quests)
             .service(quests::list_saved_quests)

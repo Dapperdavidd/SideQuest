@@ -5,7 +5,11 @@ use sqlx::{FromRow, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{AppState, auth::AuthError};
+use crate::{
+    AppState,
+    auth::AuthError,
+    payments::{PayoutRetryError, format_luna, retry_failed_payout},
+};
 
 const REPORT_STATUSES: [&str; 4] = ["OPEN", "REVIEWING", "RESOLVED", "DISMISSED"];
 const REVIEWABLE_REPORT_STATUSES: [&str; 3] = ["REVIEWING", "RESOLVED", "DISMISSED"];
@@ -21,6 +25,8 @@ pub enum AdminError {
     NotFound,
     #[error("the moderation decision is invalid")]
     Invalid,
+    #[error("the requested operation conflicts with the current record state")]
+    Conflict,
     #[error("moderation operations are temporarily unavailable")]
     Database,
 }
@@ -32,6 +38,7 @@ impl ResponseError for AdminError {
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Invalid => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Conflict => StatusCode::CONFLICT,
             Self::Database => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -45,6 +52,7 @@ impl ResponseError for AdminError {
                 Self::Forbidden => "admin_access_required",
                 Self::NotFound => "moderation_record_not_found",
                 Self::Invalid => "invalid_moderation_decision",
+                Self::Conflict => "operation_state_conflict",
                 Self::Database => "moderation_service_unavailable",
                 Self::Auth(_) => unreachable!(),
             },
@@ -105,6 +113,37 @@ pub struct AdminOrganization {
 pub struct OrganizationDecision {
     status: String,
     reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FailedPayout {
+    id: Uuid,
+    quest_id: Uuid,
+    quest_title: String,
+    recipient_username: String,
+    recipient_display_name: String,
+    amount_luna: i64,
+    amount_nim: String,
+    destination_address: String,
+    transaction_hash: String,
+    failure_reason: Option<String>,
+    current_attempt: i16,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredFailedPayout {
+    id: Uuid,
+    quest_id: Uuid,
+    quest_title: String,
+    recipient_username: String,
+    recipient_display_name: String,
+    amount_luna: i64,
+    destination_address: String,
+    transaction_hash: String,
+    failure_reason: Option<String>,
+    current_attempt: i16,
+    updated_at: DateTime<Utc>,
 }
 
 async fn authenticate_admin(request: &HttpRequest, state: &AppState) -> Result<Uuid, AdminError> {
@@ -368,6 +407,80 @@ pub async fn update_organization_verification(
         .commit()
         .await
         .map_err(|_| AdminError::Database)?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[get("/admin/payouts/failed")]
+pub async fn list_failed_payouts(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<Vec<FailedPayout>>, AdminError> {
+    authenticate_admin(&request, &state).await?;
+    let payouts = sqlx::query_as::<_, StoredFailedPayout>(
+        r#"
+        select payout.id,
+               pool.quest_id,
+               quest.title as quest_title,
+               recipient.username as recipient_username,
+               recipient.display_name as recipient_display_name,
+               payout.amount_minor as amount_luna,
+               payout.destination_address,
+               payout.transaction_hash,
+               payout.failure_reason,
+               payout.current_attempt,
+               payout.updated_at
+        from public.payouts payout
+        join public.reward_allocations allocation on allocation.id = payout.reward_allocation_id
+        join public.reward_pools pool on pool.id = allocation.reward_pool_id
+        join public.quests quest on quest.id = pool.quest_id
+        join public.users recipient on recipient.id = payout.recipient_id
+        where payout.status = 'FAILED'
+        order by payout.updated_at, payout.id
+        limit 100
+        "#,
+    )
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| AdminError::Database)?;
+    Ok(web::Json(
+        payouts
+            .into_iter()
+            .map(|payout| FailedPayout {
+                id: payout.id,
+                quest_id: payout.quest_id,
+                quest_title: payout.quest_title,
+                recipient_username: payout.recipient_username,
+                recipient_display_name: payout.recipient_display_name,
+                amount_luna: payout.amount_luna,
+                amount_nim: format_luna(payout.amount_luna),
+                destination_address: payout.destination_address,
+                transaction_hash: payout.transaction_hash,
+                failure_reason: payout.failure_reason,
+                current_attempt: payout.current_attempt,
+                updated_at: payout.updated_at,
+            })
+            .collect(),
+    ))
+}
+
+#[patch("/admin/payouts/{payout_id}/retry")]
+pub async fn retry_payout(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    payout_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AdminError> {
+    authenticate_admin(&request, &state).await?;
+    retry_failed_payout(&state, payout_id.into_inner())
+        .await
+        .map_err(|error| match error {
+            PayoutRetryError::NotFound => AdminError::NotFound,
+            PayoutRetryError::NotFailed
+            | PayoutRetryError::AttemptsExhausted
+            | PayoutRetryError::UnsafeToRetry => AdminError::Conflict,
+            PayoutRetryError::NotConfigured
+            | PayoutRetryError::VerifierUnavailable
+            | PayoutRetryError::Database => AdminError::Database,
+        })?;
     Ok(HttpResponse::NoContent().finish())
 }
 

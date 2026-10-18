@@ -1,7 +1,7 @@
 use actix_web::{HttpRequest, HttpResponse, ResponseError, get, http::StatusCode, post, put, web};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Row};
 use std::time::Duration as StdDuration;
 use thiserror::Error;
 use uuid::Uuid;
@@ -943,6 +943,147 @@ struct SubmittedPayout {
     transaction_hash: String,
 }
 
+#[derive(Debug, Error)]
+pub enum PayoutRetryError {
+    #[error("Nimiq payout verification is not configured")]
+    NotConfigured,
+    #[error("the payout was not found")]
+    NotFound,
+    #[error("only a failed payout can be retried")]
+    NotFailed,
+    #[error("the payout has reached its maximum retry count")]
+    AttemptsExhausted,
+    #[error("the previous transaction is not independently confirmed as failed")]
+    UnsafeToRetry,
+    #[error("Nimiq payout verification is temporarily unavailable")]
+    VerifierUnavailable,
+    #[error("payout retry storage is temporarily unavailable")]
+    Database,
+}
+
+pub async fn retry_failed_payout(
+    state: &AppState,
+    payout_id: Uuid,
+) -> Result<(), PayoutRetryError> {
+    let config = state
+        .payments
+        .as_ref()
+        .ok_or(PayoutRetryError::NotConfigured)?;
+    let payout = sqlx::query_as::<_, SubmittedPayout>(
+        r#"
+        select id, amount_minor as amount_luna, destination_address, transaction_hash
+        from public.payouts
+        where id = $1 and status = 'FAILED' and transaction_hash is not null
+        "#,
+    )
+    .bind(payout_id)
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| PayoutRetryError::Database)?
+    .ok_or(PayoutRetryError::NotFailed)?;
+    let receipt = verifier_lookup(config, &payout.transaction_hash)
+        .await
+        .map_err(|_| PayoutRetryError::VerifierUnavailable)?;
+    verify_payout_receipt(&receipt, &payout, config)
+        .map_err(|_| PayoutRetryError::UnsafeToRetry)?;
+    if !retryable_payout_state(&receipt.state) {
+        return Err(PayoutRetryError::UnsafeToRetry);
+    }
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| PayoutRetryError::Database)?;
+    let stored = sqlx::query(
+        r#"
+        select current_attempt, idempotency_key, provider_reference,
+               transaction_hash, submitted_at, failure_reason
+        from public.payouts
+        where id = $1 and status = 'FAILED'
+        for update
+        "#,
+    )
+    .bind(payout_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| PayoutRetryError::Database)?
+    .ok_or(PayoutRetryError::NotFailed)?;
+    let current_attempt: i16 = stored
+        .try_get("current_attempt")
+        .map_err(|_| PayoutRetryError::Database)?;
+    if current_attempt >= 3 {
+        return Err(PayoutRetryError::AttemptsExhausted);
+    }
+    let stored_hash: String = stored
+        .try_get("transaction_hash")
+        .map_err(|_| PayoutRetryError::Database)?;
+    if stored_hash != payout.transaction_hash {
+        return Err(PayoutRetryError::UnsafeToRetry);
+    }
+    let idempotency_key: String = stored
+        .try_get("idempotency_key")
+        .map_err(|_| PayoutRetryError::Database)?;
+    let provider_reference: Option<String> = stored
+        .try_get("provider_reference")
+        .map_err(|_| PayoutRetryError::Database)?;
+    let submitted_at: Option<DateTime<Utc>> = stored
+        .try_get("submitted_at")
+        .map_err(|_| PayoutRetryError::Database)?;
+    let failure_reason: Option<String> = stored
+        .try_get("failure_reason")
+        .map_err(|_| PayoutRetryError::Database)?;
+    sqlx::query(
+        r#"
+        insert into public.payout_attempts (
+          payout_id, attempt_number, idempotency_key, provider_reference,
+          transaction_hash, status, submitted_at, failure_reason
+        ) values ($1, $2, $3, $4, $5, 'FAILED', $6, $7)
+        "#,
+    )
+    .bind(payout_id)
+    .bind(current_attempt)
+    .bind(idempotency_key)
+    .bind(provider_reference)
+    .bind(stored_hash)
+    .bind(submitted_at)
+    .bind(failure_reason)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| PayoutRetryError::Database)?;
+    let next_attempt = current_attempt + 1;
+    sqlx::query(
+        r#"
+        update public.payouts
+        set status = 'PENDING',
+            current_attempt = $2,
+            idempotency_key = $3,
+            provider_reference = null,
+            transaction_hash = null,
+            submitted_at = null,
+            confirmed_at = null,
+            failure_reason = null,
+            updated_at = now()
+        where id = $1 and status = 'FAILED'
+        "#,
+    )
+    .bind(payout_id)
+    .bind(next_attempt)
+    .bind(format!("payout:{payout_id}:attempt:{next_attempt}"))
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| PayoutRetryError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| PayoutRetryError::Database)?;
+    Ok(())
+}
+
+fn retryable_payout_state(state: &str) -> bool {
+    matches!(state, "invalidated" | "expired")
+}
+
 #[derive(Debug, Deserialize)]
 struct SignerReceipt {
     idempotency_key: String,
@@ -1460,6 +1601,14 @@ mod tests {
             block_height: Some(42),
         };
         assert!(verify_payout_receipt(&receipt, &payout, &payment_config()).is_ok());
+    }
+
+    #[test]
+    fn retries_only_independently_terminal_failed_transactions() {
+        assert!(retryable_payout_state("invalidated"));
+        assert!(retryable_payout_state("expired"));
+        assert!(!retryable_payout_state("pending"));
+        assert!(!retryable_payout_state("confirmed"));
     }
 
     fn payment_config() -> crate::PaymentConfig {

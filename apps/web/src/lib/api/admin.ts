@@ -34,6 +34,21 @@ export type AdminOrganization = {
   verified_at: string | null;
 };
 
+export type FailedPayout = {
+  id: string;
+  quest_id: string;
+  quest_title: string;
+  recipient_username: string;
+  recipient_display_name: string;
+  amount_luna: number;
+  amount_nim: string;
+  destination_address: string;
+  transaction_hash: string;
+  failure_reason: string | null;
+  current_attempt: number;
+  updated_at: string;
+};
+
 export class AdminApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -57,6 +72,10 @@ export function getAdminOrganizations(status: AdminOrganization["verification_st
   return adminResponse<AdminOrganization[]>(`/admin/organizations?status=${status}`, accessToken);
 }
 
+export function getFailedPayouts(accessToken: string) {
+  return adminResponse<FailedPayout[]>("/admin/payouts/failed", accessToken);
+}
+
 export async function decideReport(reportId: string, status: "REVIEWING" | "RESOLVED" | "DISMISSED", note: string | null, accessToken: string) {
   const response = await fetch(apiUrl(`/admin/reports/${encodeURIComponent(reportId)}`), {
     method: "PATCH",
@@ -73,4 +92,12 @@ export async function decideOrganization(organizationId: string, status: "VERIFI
     body: JSON.stringify({ status, reason }),
   });
   if (!response.ok) throw new AdminApiError(await readApiError(response, "The verification decision could not be saved."), response.status);
+}
+
+export async function retryFailedPayout(payoutId: string, accessToken: string) {
+  const response = await fetch(apiUrl(`/admin/payouts/${encodeURIComponent(payoutId)}/retry`), {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new AdminApiError(await readApiError(response, "The payout could not be safely retried."), response.status);
 }

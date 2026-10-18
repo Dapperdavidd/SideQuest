@@ -42,6 +42,7 @@ async fn main() -> io::Result<()> {
         .connect(&database_url)
         .await
         .map_err(io::Error::other)?;
+    let shutdown_database = database.clone();
     let payments = payment_config_from_environment();
     if payments.is_none() {
         tracing::warn!("Nimiq funding is disabled because its public configuration is incomplete");
@@ -75,7 +76,9 @@ async fn main() -> io::Result<()> {
     })
     .bind((host, port))?
     .run()
-    .await
+    .await?;
+    shutdown_database.close().await;
+    Ok(())
 }
 
 fn admin_user_ids_from_environment() -> HashSet<Uuid> {

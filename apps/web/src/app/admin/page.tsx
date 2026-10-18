@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { AdminApiError, getAdminOrganizations, getAdminReports } from "@/lib/api/admin";
+import { AdminApiError, getAdminOrganizations, getAdminReports, getFailedPayouts } from "@/lib/api/admin";
 import { createClient } from "@/lib/supabase/server";
 import { OperationsConsole } from "./operations-console";
 
@@ -28,16 +28,17 @@ async function AdminContent() {
     return <AdminShell><div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8"><ShieldCheck size={30} className="text-accent" /><h1 className="mt-5 font-display text-3xl font-bold">Administrator access required</h1><p className="mt-3 max-w-xl leading-7 text-white/55">This operations area is protected by the server’s administrator allowlist. No moderation data was exposed.</p></div></AdminShell>;
   }
   if (!queue) throw new Error("The operations queue could not be loaded.");
-  return <AdminShell><OperationsConsole initialReports={[...queue.reviewingReports, ...queue.openReports]} initialOrganizations={queue.organizations} accessToken={session.access_token} /></AdminShell>;
+  return <AdminShell><OperationsConsole initialReports={[...queue.reviewingReports, ...queue.openReports]} initialOrganizations={queue.organizations} initialFailedPayouts={queue.failedPayouts} accessToken={session.access_token} /></AdminShell>;
 }
 
 async function loadAdminQueue(accessToken: string) {
-  const [openReports, reviewingReports, organizations] = await Promise.all([
+  const [openReports, reviewingReports, organizations, failedPayouts] = await Promise.all([
     getAdminReports("OPEN", accessToken),
     getAdminReports("REVIEWING", accessToken),
     getAdminOrganizations("PENDING", accessToken),
+    getFailedPayouts(accessToken),
   ]);
-  return { openReports, reviewingReports, organizations };
+  return { openReports, reviewingReports, organizations, failedPayouts };
 }
 
 function AdminShell({ children }: { children: React.ReactNode }) {
