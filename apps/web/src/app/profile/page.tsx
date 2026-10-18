@@ -11,6 +11,7 @@ import { signOut } from "./actions";
 import { PayoutDestinationForm } from "./payout-destination-form";
 import { createClient } from "@/lib/supabase/server";
 import { BusinessProfilePanel } from "./business-profile-panel";
+import { ProfileEditor } from "./profile-editor";
 
 export default function ProfilePage() {
   return (
@@ -60,6 +61,7 @@ async function ProfileContent() {
               <h1 className="mt-2 font-display text-4xl font-bold tracking-[-0.04em]">{viewer.displayName}</h1>
               <p className="mt-1 text-sm text-white/45">@{viewer.username}</p>
               <p className="mt-4 max-w-xl text-sm leading-6 text-white/60">{viewer.bio ?? `${firstName} is turning everyday moments into small adventures.`}</p>
+              <ProfileEditor profile={viewer} />
             </div>
           </div>
         </section>
