@@ -508,7 +508,7 @@ async fn find_profile(
                (select count(distinct e.quest_id) from public.quest_entries e join public.quests q on q.id = e.quest_id where e.participant_id = u.id and q.status = 'FINALIZED') as completed_quests_count,
                (select count(*) from public.quest_winners w join public.quest_entries e on e.id = w.entry_id where e.participant_id = u.id) as wins_count
         from public.users u
-        where {predicate}
+        where {predicate} and u.account_status = 'ACTIVE'
         "#,
     );
     sqlx::query_as::<_, Profile>(&query)
@@ -539,6 +539,7 @@ async fn list_relationship_profiles(
                (select count(*) from public.quest_winners w join public.quest_entries e on e.id = w.entry_id where e.participant_id = u.id) as wins_count
         from public.users u
         join public.user_follows f on {join_condition}
+        where u.account_status = 'ACTIVE'
         order by f.created_at desc
         limit 100
         "#,

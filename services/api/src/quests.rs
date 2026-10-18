@@ -477,6 +477,7 @@ pub async fn list_quests(
           end as distance_km
         ) distance
         where q.visibility = 'PUBLIC'
+          and u.account_status = 'ACTIVE'
           and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
           and ($2::text is null or q.quest_type::text = $2)
           and (
@@ -1087,6 +1088,7 @@ async fn find_quest(
         left join public.organizations organization on organization.id = q.organization_id
         where q.id = $1
           and ($2::uuid is null or q.creator_id = $2)
+          and (not $3 or u.account_status = 'ACTIVE')
           and (
             not $3
             or (q.visibility = 'PUBLIC' and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED'))

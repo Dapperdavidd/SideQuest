@@ -60,6 +60,15 @@ export type SuspendedQuest = {
   suspended_at: string;
 };
 
+export type SuspendedUser = {
+  suspension_id: string;
+  user_id: string;
+  username: string;
+  display_name: string;
+  reason: string;
+  suspended_at: string;
+};
+
 export class AdminApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -89,6 +98,10 @@ export function getFailedPayouts(accessToken: string) {
 
 export function getSuspendedQuests(accessToken: string) {
   return adminResponse<SuspendedQuest[]>("/admin/quests/suspended", accessToken);
+}
+
+export function getSuspendedUsers(accessToken: string) {
+  return adminResponse<SuspendedUser[]>("/admin/users/suspended", accessToken);
 }
 
 export async function decideReport(reportId: string, status: "REVIEWING" | "RESOLVED" | "DISMISSED", note: string | null, accessToken: string) {
@@ -124,4 +137,13 @@ export async function changeQuestSuspension(questId: string, action: "suspend" |
     body: JSON.stringify({ reason }),
   });
   if (!response.ok) throw new AdminApiError(await readApiError(response, `The quest could not be ${action === "suspend" ? "suspended" : "reinstated"}.`), response.status);
+}
+
+export async function changeUserSuspension(userId: string, action: "suspend" | "reinstate", reason: string, accessToken: string) {
+  const response = await fetch(apiUrl(`/admin/users/${encodeURIComponent(userId)}/${action}`), {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!response.ok) throw new AdminApiError(await readApiError(response, `The account could not be ${action === "suspend" ? "suspended" : "reinstated"}.`), response.status);
 }

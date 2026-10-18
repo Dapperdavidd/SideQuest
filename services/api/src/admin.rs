@@ -163,6 +163,16 @@ pub struct SuspendedQuest {
     suspended_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+pub struct SuspendedUser {
+    suspension_id: Uuid,
+    user_id: Uuid,
+    username: String,
+    display_name: String,
+    reason: String,
+    suspended_at: DateTime<Utc>,
+}
+
 async fn authenticate_admin(request: &HttpRequest, state: &AppState) -> Result<Uuid, AdminError> {
     let user = state.auth.authenticate(request).await?;
     if !state.admin_user_ids.contains(&user.id) {
@@ -642,6 +652,135 @@ pub async fn reinstate_quest(
     sqlx::query("insert into public.notifications (user_id, actor_id, quest_id, kind, title, body, href) values ($1, $2, $3, 'QUEST_REINSTATED', 'Quest reinstated', $4, '/quests/' || $3::text)")
         .bind(creator_id).bind(moderator_id).bind(quest_id)
         .bind(format!("“{title}” was reinstated after review."))
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[get("/admin/users/suspended")]
+pub async fn list_suspended_users(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<Vec<SuspendedUser>>, AdminError> {
+    authenticate_admin(&request, &state).await?;
+    let users = sqlx::query_as::<_, SuspendedUser>(
+        r#"
+        select suspension.id as suspension_id, account.id as user_id,
+               account.username, account.display_name,
+               suspension.reason, suspension.suspended_at
+        from public.user_suspensions suspension
+        join public.users account on account.id = suspension.user_id
+        where suspension.reinstated_at is null and account.account_status = 'SUSPENDED'
+        order by suspension.suspended_at, suspension.id
+        limit 100
+        "#,
+    )
+    .fetch_all(&state.database)
+    .await
+    .map_err(|_| AdminError::Database)?;
+    Ok(web::Json(users))
+}
+
+#[patch("/admin/users/{user_id}/suspend")]
+pub async fn suspend_user(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    user_id: web::Path<Uuid>,
+    decision: web::Json<QuestEnforcementDecision>,
+) -> Result<HttpResponse, AdminError> {
+    let moderator_id = authenticate_admin(&request, &state).await?;
+    let user_id = user_id.into_inner();
+    let reason = decision.reason.trim();
+    if moderator_id == user_id || !valid_note(Some(reason)) {
+        return Err(AdminError::Invalid);
+    }
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    let account =
+        sqlx::query("select username, account_status from public.users where id = $1 for update")
+            .bind(user_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|_| AdminError::Database)?
+            .ok_or(AdminError::NotFound)?;
+    let status: String = account
+        .try_get("account_status")
+        .map_err(|_| AdminError::Database)?;
+    if status == "SUSPENDED" {
+        return Err(AdminError::Conflict);
+    }
+    sqlx::query(
+        "insert into public.user_suspensions (user_id, moderator_id, reason) values ($1, $2, $3)",
+    )
+    .bind(user_id)
+    .bind(moderator_id)
+    .bind(reason)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| AdminError::Database)?;
+    sqlx::query(
+        "update public.users set account_status = 'SUSPENDED', updated_at = now() where id = $1",
+    )
+    .bind(user_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| AdminError::Database)?;
+    sqlx::query("insert into public.notifications (user_id, actor_id, kind, title, body, href) values ($1, $2, 'ACCOUNT_SUSPENDED', 'Account suspended', 'Your SideQuest account was suspended after a safety review.', '/profile')")
+        .bind(user_id).bind(moderator_id)
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[patch("/admin/users/{user_id}/reinstate")]
+pub async fn reinstate_user(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    user_id: web::Path<Uuid>,
+    decision: web::Json<QuestEnforcementDecision>,
+) -> Result<HttpResponse, AdminError> {
+    let moderator_id = authenticate_admin(&request, &state).await?;
+    let user_id = user_id.into_inner();
+    let note = decision.reason.trim();
+    if !valid_note(Some(note)) {
+        return Err(AdminError::Invalid);
+    }
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| AdminError::Database)?;
+    let suspension_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        select suspension.id
+        from public.user_suspensions suspension
+        join public.users account on account.id = suspension.user_id
+        where suspension.user_id = $1 and suspension.reinstated_at is null
+          and account.account_status = 'SUSPENDED'
+        for update of suspension, account
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| AdminError::Database)?
+    .ok_or(AdminError::Conflict)?;
+    sqlx::query("update public.user_suspensions set reinstated_by = $2, reinstated_at = now(), reinstatement_note = $3 where id = $1 and reinstated_at is null")
+        .bind(suspension_id).bind(moderator_id).bind(note)
+        .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    sqlx::query("update public.users set account_status = 'ACTIVE', updated_at = now() where id = $1 and account_status = 'SUSPENDED'")
+        .bind(user_id).execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
+    sqlx::query("insert into public.notifications (user_id, actor_id, kind, title, body, href) values ($1, $2, 'ACCOUNT_REINSTATED', 'Account reinstated', 'Your SideQuest account was reinstated after review.', '/profile')")
+        .bind(user_id).bind(moderator_id)
         .execute(&mut *transaction).await.map_err(|_| AdminError::Database)?;
     transaction
         .commit()

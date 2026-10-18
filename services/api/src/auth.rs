@@ -3,6 +3,7 @@ use std::sync::Arc;
 use actix_web::{HttpRequest, HttpResponse, ResponseError, http::StatusCode};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -29,6 +30,8 @@ pub enum AuthError {
     InvalidToken,
     #[error("authentication service is temporarily unavailable")]
     ProviderUnavailable,
+    #[error("this SideQuest account is suspended")]
+    AccountSuspended,
 }
 
 impl ResponseError for AuthError {
@@ -38,6 +41,7 @@ impl ResponseError for AuthError {
                 StatusCode::UNAUTHORIZED
             }
             Self::ProviderUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::AccountSuspended => StatusCode::FORBIDDEN,
         }
     }
 
@@ -45,6 +49,7 @@ impl ResponseError for AuthError {
         HttpResponse::build(self.status_code()).json(serde_json::json!({
             "code": match self {
                 Self::ProviderUnavailable => "auth_provider_unavailable",
+                Self::AccountSuspended => "account_suspended",
                 _ => "unauthorized",
             },
             "message": self.to_string(),
@@ -57,14 +62,16 @@ pub struct AuthVerifier {
     client: reqwest::Client,
     jwks_url: Arc<str>,
     keys: Arc<RwLock<Option<JwkSet>>>,
+    database: PgPool,
 }
 
 impl AuthVerifier {
-    pub fn new(jwks_url: impl Into<Arc<str>>) -> Self {
+    pub fn new(jwks_url: impl Into<Arc<str>>, database: PgPool) -> Self {
         Self {
             client: reqwest::Client::new(),
             jwks_url: jwks_url.into(),
             keys: Arc::new(RwLock::new(None)),
+            database,
         }
     }
 
@@ -95,6 +102,18 @@ impl AuthVerifier {
             .map_err(|_| AuthError::InvalidToken)?
             .claims;
         let id = Uuid::parse_str(&claims.sub).map_err(|_| AuthError::InvalidToken)?;
+
+        let account_status = sqlx::query_scalar::<_, String>(
+            "select account_status from public.users where id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.database)
+        .await
+        .map_err(|_| AuthError::ProviderUnavailable)?
+        .ok_or(AuthError::InvalidToken)?;
+        if account_status == "SUSPENDED" {
+            return Err(AuthError::AccountSuspended);
+        }
 
         Ok(AuthenticatedUser { id })
     }

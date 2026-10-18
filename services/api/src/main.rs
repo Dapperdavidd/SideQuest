@@ -53,9 +53,10 @@ async fn main() -> io::Result<()> {
             "automatic NIM payouts are disabled because the local signer is not configured"
         );
     }
+    let auth = AuthVerifier::new(jwks_url, database.clone());
     let state = AppState {
         database,
-        auth: AuthVerifier::new(jwks_url),
+        auth,
         payments,
         payout_signer,
         admin_user_ids: admin_user_ids_from_environment(),
