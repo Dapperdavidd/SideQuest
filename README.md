@@ -109,4 +109,6 @@ Wallet access is optional. The web app remains usable in a normal browser and de
 
 Monetary quests remain `AWAITING_FUNDING` until the API independently verifies the exact Nimiq Pay transaction through the TestAlbatross verifier. Client wallet success alone never opens a quest or records a payout. Automatic winner payouts remain disabled until the isolated signer is configured. See [verified reward funding readiness](docs/payment-readiness.md) for the full security model.
 
+Unpublished quest drafts are resumable from **My quests** on both web and mobile. Draft rules can be changed only by the creator and become immutable as soon as the quest is published or enters reward funding.
+
 See [architecture](docs/architecture.md) and [technical validation](docs/technical-validation.md) for the current engineering decisions and external setup requirements.

@@ -1,5 +1,5 @@
 use actix_web::{
-    HttpRequest, HttpResponse, ResponseError, delete, get, http::StatusCode, post, put, web,
+    HttpRequest, HttpResponse, ResponseError, delete, get, http::StatusCode, patch, post, put, web,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -278,6 +278,8 @@ pub enum QuestError {
     AlreadyJoined,
     #[error("this quest can no longer be cancelled safely")]
     CannotCancel,
+    #[error("only an unpublished draft can be edited")]
+    CannotEdit,
     #[error("quest service is temporarily unavailable")]
     Database,
 }
@@ -289,9 +291,11 @@ impl ResponseError for QuestError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::InvalidQuest | Self::InvalidDeadline => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotCreator => StatusCode::FORBIDDEN,
-            Self::NotOpen | Self::CreatorCannotJoin | Self::AlreadyJoined | Self::CannotCancel => {
-                StatusCode::CONFLICT
-            }
+            Self::NotOpen
+            | Self::CreatorCannotJoin
+            | Self::AlreadyJoined
+            | Self::CannotCancel
+            | Self::CannotEdit => StatusCode::CONFLICT,
             Self::Database => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -311,6 +315,7 @@ impl ResponseError for QuestError {
                 Self::CreatorCannotJoin => "creator_cannot_join",
                 Self::AlreadyJoined => "quest_already_joined",
                 Self::CannotCancel => "quest_cannot_be_cancelled",
+                Self::CannotEdit => "quest_cannot_be_edited",
                 Self::Database => "quest_service_unavailable",
                 Self::Auth(_) => unreachable!(),
             },
@@ -755,6 +760,109 @@ pub async fn create_quest(
 
     let created = find_creator_quest(&state, created_id, user.id).await?;
     Ok((web::Json(created), StatusCode::CREATED))
+}
+
+#[patch("/quests/{quest_id}")]
+pub async fn update_quest(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    quest_id: web::Path<Uuid>,
+    quest: web::Json<CreateQuest>,
+) -> Result<web::Json<Quest>, QuestError> {
+    quest.validate()?;
+    let user = state.auth.authenticate(&request).await?;
+    let quest_id = quest_id.into_inner();
+
+    if let Some(organization_id) = quest.organization_id {
+        let authorized = sqlx::query_scalar::<_, bool>(
+            "select exists(select 1 from public.organizations where id = $1 and owner_id = $2 and verification_status = 'VERIFIED')",
+        )
+        .bind(organization_id)
+        .bind(user.id)
+        .fetch_one(&state.database)
+        .await
+        .map_err(|_| QuestError::Database)?;
+        if !authorized {
+            return Err(QuestError::InvalidQuest);
+        }
+    }
+
+    let updated = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        update public.quests
+        set organization_id = $3,
+            title = $4,
+            description = $5,
+            cover_media_url = $6,
+            location_name = $7,
+            latitude = $8,
+            longitude = $9,
+            quest_type = $10::quest_type,
+            visibility = $11::quest_visibility,
+            is_group_challenge = $12,
+            required_group_size = $13,
+            group_instructions = $14,
+            max_entries = $15,
+            winner_count = $16,
+            winner_selection_method = $17::winner_selection_method,
+            proof_requirements = $18,
+            judging_criteria = $19,
+            reward_enabled = $20,
+            reward_amount_minor = $21,
+            reward_currency = $22,
+            settlement_asset = $23,
+            deadline = $24,
+            updated_at = now()
+        where id = $1 and creator_id = $2 and status = 'DRAFT'
+        returning id
+        "#,
+    )
+    .bind(quest_id)
+    .bind(user.id)
+    .bind(quest.organization_id)
+    .bind(quest.title.trim())
+    .bind(quest.description.trim())
+    .bind(quest.cover_media_url.as_deref().map(str::trim))
+    .bind(quest.location_name.as_deref().map(str::trim))
+    .bind(quest.latitude)
+    .bind(quest.longitude)
+    .bind(quest.quest_type.as_str())
+    .bind(quest.visibility.as_str())
+    .bind(quest.is_group_challenge)
+    .bind(quest.required_group_size.map(|size| size as i16))
+    .bind(quest.group_instructions.as_deref().map(str::trim))
+    .bind(i16::from(quest.max_entries))
+    .bind(i16::from(quest.winner_count))
+    .bind(quest.winner_selection_method.as_database_value())
+    .bind(&quest.proof_requirements)
+    .bind(quest.judging_criteria.as_deref().map(str::trim))
+    .bind(quest.reward_enabled)
+    .bind(quest.reward_amount_minor)
+    .bind(quest.reward_currency.as_deref())
+    .bind(quest.settlement_asset.as_deref())
+    .bind(quest.deadline)
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?;
+
+    if updated.is_none() {
+        let ownership = sqlx::query_as::<_, (Uuid, String)>(
+            "select creator_id, status::text from public.quests where id = $1",
+        )
+        .bind(quest_id)
+        .fetch_optional(&state.database)
+        .await
+        .map_err(|_| QuestError::Database)?;
+        return match ownership {
+            None => Err(QuestError::NotFound),
+            Some((creator_id, _)) if creator_id != user.id => Err(QuestError::NotCreator),
+            Some(_) => Err(QuestError::CannotEdit),
+        };
+    }
+
+    Ok(web::Json(
+        find_creator_quest(&state, quest_id, user.id).await?,
+    ))
 }
 
 #[post("/quests/{quest_id}/publish")]

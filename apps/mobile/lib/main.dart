@@ -163,7 +163,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/create',
-        builder: (context, state) => const CreateQuestScreen(),
+        builder: (context, state) =>
+            CreateQuestScreen(draftId: state.uri.queryParameters['edit']),
       ),
       GoRoute(
         path: '/notifications',
@@ -233,6 +234,7 @@ class Quest {
     this.organizationId,
     this.organizationSlug,
     this.organizationDisplayName,
+    this.judgingCriteria,
   });
 
   factory Quest.fromJson(Map<String, dynamic> json) => Quest(
@@ -269,6 +271,7 @@ class Quest {
     organizationId: json['organization_id'] as String?,
     organizationSlug: json['organization_slug'] as String?,
     organizationDisplayName: json['organization_display_name'] as String?,
+    judgingCriteria: json['judging_criteria'] as String?,
   );
 
   final String id;
@@ -302,6 +305,7 @@ class Quest {
   final String? organizationId;
   final String? organizationSlug;
   final String? organizationDisplayName;
+  final String? judgingCriteria;
 
   String get image =>
       coverMediaUrl ??
@@ -639,6 +643,17 @@ class QuestRepository {
     return QuestCheckpoint.fromJson(response.data!);
   }
 
+  Future<void> deleteCheckpoint(
+    String questId,
+    String checkpointId,
+    String accessToken,
+  ) async {
+    await _dio.delete<void>(
+      '/quests/$questId/checkpoints/$checkpointId',
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+  }
+
   Future<Map<String, dynamic>> completeCheckpoint(
     String questId,
     String checkpointId,
@@ -804,6 +819,19 @@ class QuestRepository {
   ) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/quests',
+      data: payload,
+      options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+    );
+    return Quest.fromJson(response.data!);
+  }
+
+  Future<Quest> updateQuest(
+    String id,
+    Map<String, dynamic> payload,
+    String accessToken,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/quests/$id',
       data: payload,
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
@@ -5608,10 +5636,17 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 }
 
 class _CheckpointDraft {
-  _CheckpointDraft()
-    : title = TextEditingController(),
-      instructions = TextEditingController();
+  _CheckpointDraft({
+    this.id,
+    String initialTitle = '',
+    String initialInstructions = '',
+  }) : title = TextEditingController(),
+       instructions = TextEditingController() {
+    title.text = initialTitle;
+    instructions.text = initialInstructions;
+  }
 
+  final String? id;
   final TextEditingController title;
   final TextEditingController instructions;
 
@@ -5622,7 +5657,9 @@ class _CheckpointDraft {
 }
 
 class CreateQuestScreen extends ConsumerStatefulWidget {
-  const CreateQuestScreen({super.key});
+  const CreateQuestScreen({this.draftId, super.key});
+
+  final String? draftId;
 
   @override
   ConsumerState<CreateQuestScreen> createState() => _CreateQuestScreenState();
@@ -5653,6 +5690,98 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   bool locatingQuest = false;
   bool sponsoredByBusiness = false;
   final checkpointDrafts = <_CheckpointDraft>[_CheckpointDraft()];
+  final savedCheckpointIds = <String>[];
+  bool draftLoadStarted = false;
+  bool loadingDraft = false;
+  bool draftLoadFailed = false;
+  String? storedCoverUrl;
+  double? storedLatitude;
+  double? storedLongitude;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!draftLoadStarted && widget.draftId != null && currentSession != null) {
+      draftLoadStarted = true;
+      Future<void>.microtask(loadDraft);
+    }
+  }
+
+  Future<void> loadDraft() async {
+    setState(() => loadingDraft = true);
+    try {
+      final repository = ref.read(questRepositoryProvider);
+      final results = await Future.wait<Object>([
+        repository.getQuest(widget.draftId!),
+        repository.listCheckpoints(widget.draftId!),
+      ]);
+      final draft = results[0] as Quest;
+      final savedCheckpoints = results[1] as List<QuestCheckpoint>;
+      final session = currentSession;
+      if (session == null ||
+          draft.creatorId != session.user.id ||
+          draft.status != 'DRAFT') {
+        throw StateError('Only your unpublished drafts can be edited.');
+      }
+      titleController.text = draft.title;
+      descriptionController.text = draft.description;
+      criteriaController.text = draft.judgingCriteria ?? '';
+      rewardController.text = draft.rewardAmountMinor == null
+          ? '10'
+          : (draft.rewardAmountMinor! / 100000).toString();
+      locationController.text = draft.locationName ?? '';
+      groupInstructionsController.text = draft.groupInstructions ?? '';
+      for (final checkpoint in checkpointDrafts) {
+        checkpoint.dispose();
+      }
+      checkpointDrafts
+        ..clear()
+        ..addAll(
+          savedCheckpoints.isEmpty
+              ? [_CheckpointDraft()]
+              : savedCheckpoints.map(
+                  (checkpoint) => _CheckpointDraft(
+                    id: checkpoint.id,
+                    initialTitle: checkpoint.title,
+                    initialInstructions: checkpoint.instructions ?? '',
+                  ),
+                ),
+        );
+      savedCheckpointIds
+        ..clear()
+        ..addAll(savedCheckpoints.map((checkpoint) => checkpoint.id));
+      if (!mounted) return;
+      setState(() {
+        questType = draft.questType;
+        visibility = draft.visibility;
+        deadline = draft.deadline;
+        isGroup = draft.isGroupChallenge;
+        groupSize = draft.requiredGroupSize ?? 2;
+        maxEntries = draft.maxEntries;
+        proofRequirements
+          ..clear()
+          ..addAll(draft.proofRequirements);
+        selectionMethod = draft.winnerSelectionMethod;
+        winnerCount = draft.winnerCount;
+        rewardEnabled = draft.rewardEnabled;
+        sponsoredByBusiness = draft.organizationId != null;
+        storedCoverUrl = draft.coverMediaUrl;
+        storedLatitude = draft.latitude;
+        storedLongitude = draft.longitude;
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          draftLoadFailed = true;
+          errorMessage = error is StateError
+              ? error.message
+              : 'This saved draft could not be loaded.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => loadingDraft = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -5685,7 +5814,9 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   };
 
   bool get locationReady =>
-      locationController.text.trim().length >= 2 && questPosition != null;
+      locationController.text.trim().length >= 2 &&
+      (questPosition != null ||
+          (storedLatitude != null && storedLongitude != null));
 
   bool get checkpointsReady =>
       checkpointDrafts.isNotEmpty &&
@@ -5738,7 +5869,13 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       final position = await currentDevicePosition(
         accuracy: LocationAccuracy.high,
       );
-      if (mounted) setState(() => questPosition = position);
+      if (mounted) {
+        setState(() {
+          questPosition = position;
+          storedLatitude = null;
+          storedLongitude = null;
+        });
+      }
     } on Object {
       if (mounted) {
         setState(() {
@@ -5772,7 +5909,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       final organization = sponsoredByBusiness
           ? await repository.getMyOrganization(session.accessToken)
           : null;
-      String? coverMediaUrl;
+      String? coverMediaUrl = storedCoverUrl;
       if (coverFile != null) {
         final bytes = await coverFile!.readAsBytes();
         if (bytes.length > 10 * 1024 * 1024) {
@@ -5800,7 +5937,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             .from('quest-covers')
             .getPublicUrl(uploadedCoverPath);
       }
-      final created = await repository.createQuest({
+      final payload = <String, dynamic>{
         'title': titleController.text.trim(),
         'description': descriptionController.text.trim(),
         'organization_id': sponsoredByBusiness ? organization?.id : null,
@@ -5809,10 +5946,10 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             ? locationController.text.trim()
             : null,
         'latitude': questType == 'EXPLORE' && locationReady
-            ? questPosition!.latitude
+            ? questPosition?.latitude ?? storedLatitude
             : null,
         'longitude': questType == 'EXPLORE' && locationReady
-            ? questPosition!.longitude
+            ? questPosition?.longitude ?? storedLongitude
             : null,
         'quest_type': questType,
         'visibility': visibility,
@@ -5835,8 +5972,24 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'reward_currency': rewardEnabled ? 'NIM' : null,
         'settlement_asset': rewardEnabled ? 'NIM' : null,
         'deadline': deadline.toUtc().toIso8601String(),
-      }, session.accessToken);
+      };
+      final created = widget.draftId == null
+          ? await repository.createQuest(payload, session.accessToken)
+          : await repository.updateQuest(
+              widget.draftId!,
+              payload,
+              session.accessToken,
+            );
       draftCreated = true;
+      if (widget.draftId != null) {
+        for (final checkpointId in savedCheckpointIds) {
+          await repository.deleteCheckpoint(
+            created.id,
+            checkpointId,
+            session.accessToken,
+          );
+        }
+      }
       if (proofRequirements.contains('QR_CHECKPOINT')) {
         for (final checkpoint in checkpointDrafts) {
           await repository.createCheckpoint(
@@ -5912,9 +6065,53 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
 
     final organization = ref.watch(myOrganizationProvider).value;
     const stepNames = ['Quest', 'Proof', 'Winners', 'Review'];
+    if (loadingDraft) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Edit draft'),
+          backgroundColor: background,
+        ),
+        body: const Center(child: CircularProgressIndicator(color: ink)),
+      );
+    }
+    if (draftLoadFailed) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Edit draft'),
+          backgroundColor: background,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.edit_off_outlined, size: 42, color: muted),
+                const SizedBox(height: 14),
+                const Text(
+                  'Draft unavailable',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  errorMessage ?? 'This saved draft could not be loaded.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: muted, height: 1.4),
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () => context.go('/my-quests'),
+                  child: const Text('Return to My quests'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create a quest'),
+        title: Text(widget.draftId == null ? 'Create a quest' : 'Edit draft'),
         backgroundColor: background,
       ),
       body: SafeArea(
@@ -6162,12 +6359,12 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
                 label: Text(
                   locatingQuest
                       ? 'Getting location…'
-                      : questPosition == null
+                      : !locationReady
                       ? 'Use current location'
                       : 'Update coordinates',
                 ),
               ),
-              if (questPosition != null)
+              if (locationReady)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text(
@@ -6200,7 +6397,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: line),
           ),
-          child: coverFile == null
+          child: coverFile == null && storedCoverUrl == null
               ? const Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -6220,7 +6417,9 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
               : Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.file(File(coverFile!.path), fit: BoxFit.cover),
+                    coverFile != null
+                        ? Image.file(File(coverFile!.path), fit: BoxFit.cover)
+                        : Image.network(storedCoverUrl!, fit: BoxFit.cover),
                     const DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -7089,6 +7288,7 @@ class _MyQuestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final open = quest.status == 'OPEN';
+    final editable = quest.isCreator && quest.status == 'DRAFT';
     final reviewable =
         quest.isCreator &&
         (quest.status == 'CLOSED_FOR_REVIEW' ||
@@ -7101,7 +7301,9 @@ class _MyQuestCard extends StatelessWidget {
             quest.status == 'AWAITING_FUNDING' ||
             (open && !quest.rewardEnabled && quest.entriesReceived == 0));
     return InkWell(
-      onTap: reviewable
+      onTap: editable
+          ? () => context.push('/create?edit=${quest.id}')
+          : reviewable
           ? () => context.push('/quests/${quest.id}/review')
           : open
           ? () => context.push('/quests/${quest.id}')
@@ -7232,7 +7434,16 @@ class _MyQuestCard extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                if (open || reviewable)
+                if (editable)
+                  const Text(
+                    'Resume editing',
+                    style: TextStyle(
+                      color: Color(0xFF698A00),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                if (open || reviewable || editable)
                   const Icon(Icons.chevron_right_rounded, color: muted),
               ],
             ),

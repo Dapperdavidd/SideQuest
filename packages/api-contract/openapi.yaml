@@ -526,6 +526,33 @@ paths:
                 $ref: "#/components/schemas/Quest"
         "404":
           description: Quest is missing or inaccessible to the caller
+    patch:
+      summary: Replace the authenticated creator's unpublished draft settings
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQuest"
+      responses:
+        "200":
+          description: Updated draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quest"
+        "403":
+          description: The authenticated user is not the creator
+        "404":
+          description: Quest not found
+        "409":
+          description: The quest has already left draft state and is immutable
+        "422":
+          description: Quest fields violate product rules
   /quests/{questId}/saved:
     get:
       summary: Check whether the authenticated user saved a quest

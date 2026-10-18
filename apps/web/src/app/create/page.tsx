@@ -5,14 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, Plus, QrCode, Trash2, UsersRound, WalletCards, X } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { apiUrl, getMyOrganization, readApiError, type Organization, type Quest } from "@/lib/api/quests";
+import { apiUrl, getMyOrganization, getQuest, getQuestCheckpoints, readApiError, type Organization, type Quest } from "@/lib/api/quests";
 import { createClient } from "@/lib/supabase/client";
 import { FundingPanel } from "./funding-panel";
 
 type QuestType = "Friends" | "Bounty" | "Explore";
 type SelectionMethod = "First valid" | "Best submission";
 type Visibility = "PUBLIC" | "PRIVATE" | "INVITE_ONLY";
-type CheckpointDraft = { title: string; instructions: string };
+type CheckpointDraft = { id?: string; title: string; instructions: string };
 
 const stepNames = ["Quest", "People", "Proof", "Winners", "Reward", "Review"];
 
@@ -46,14 +46,70 @@ export default function CreateQuestPage() {
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<CheckpointDraft[]>([{ title: "", instructions: "" }]);
+  const [savedCheckpointIds, setSavedCheckpointIds] = useState<string[]>([]);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [sponsoredByBusiness, setSponsoredByBusiness] = useState(false);
+  const [editingQuestId, setEditingQuestId] = useState<string | null>(null);
+  const [storedCoverUrl, setStoredCoverUrl] = useState<string | null>(null);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    void createClient().auth.getSession().then(({ data: { session } }) => {
+    let active = true;
+    void createClient().auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return;
-      void getMyOrganization(session.access_token).then((value) => setOrganization(value)).catch(() => undefined);
+      void getMyOrganization(session.access_token)
+        .then((value) => { if (active) setOrganization(value); })
+        .catch(() => undefined);
+
+      const questId = new URLSearchParams(window.location.search).get("edit");
+      if (!questId || !active) return;
+      setLoadingDraft(true);
+      try {
+        const [draft, savedCheckpoints] = await Promise.all([
+          getQuest(questId, session.access_token),
+          getQuestCheckpoints(questId, session.access_token),
+        ]);
+        if (!draft || draft.creator_id !== session.user.id || draft.status !== "DRAFT") {
+          throw new Error("Only your unpublished drafts can be edited.");
+        }
+        if (!active) return;
+        setEditingQuestId(draft.id);
+        setTitle(draft.title);
+        setDescription(draft.description);
+        setQuestType(`${draft.quest_type[0]}${draft.quest_type.slice(1).toLowerCase()}` as QuestType);
+        setVisibility(draft.visibility);
+        setIsGroup(draft.is_group_challenge);
+        setGroupSize(draft.required_group_size ?? 2);
+        setGroupInstructions(draft.group_instructions ?? "");
+        setMaxEntries(draft.max_entries);
+        setProof(draft.proof_requirements.map((value) => value === "QR_CHECKPOINT" ? "QR checkpoint" : `${value[0]}${value.slice(1).toLowerCase()}`));
+        setSelectionMethod(draft.winner_selection_method === "BEST_SUBMISSION" ? "Best submission" : "First valid");
+        setJudgingCriteria(draft.judging_criteria ?? "");
+        setWinners(draft.winner_count);
+        setRewardEnabled(draft.reward_enabled);
+        setRewardAmount(draft.reward_amount_minor ? draft.reward_amount_minor / 100_000 : 10);
+        setLocationName(draft.location_name ?? "");
+        setLatitude(draft.latitude);
+        setLongitude(draft.longitude);
+        setStoredCoverUrl(draft.cover_media_url);
+        setCoverPreview(draft.cover_media_url);
+        setSponsoredByBusiness(Boolean(draft.organization_id));
+        const deadlineDate = new Date(draft.deadline);
+        deadlineDate.setMinutes(deadlineDate.getMinutes() - deadlineDate.getTimezoneOffset());
+        setDeadline(deadlineDate.toISOString().slice(0, 16));
+        setDeadlineValid(deadlineDate.getTime() > Date.now());
+        if (savedCheckpoints.length) {
+          setSavedCheckpointIds(savedCheckpoints.map((checkpoint) => checkpoint.id));
+          setCheckpoints(savedCheckpoints.map((checkpoint) => ({ id: checkpoint.id, title: checkpoint.title, instructions: checkpoint.instructions ?? "" })));
+        }
+      } catch (error) {
+        if (active) setDraftLoadError(error instanceof Error ? error.message : "This draft could not be loaded.");
+      } finally {
+        if (active) setLoadingDraft(false);
+      }
     });
+    return () => { active = false; };
   }, []);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
@@ -123,7 +179,7 @@ export default function CreateQuestPage() {
         return;
       }
 
-      let coverMediaUrl: string | null = null;
+      let coverMediaUrl: string | null = storedCoverUrl;
       if (coverFile) {
         if (coverFile.size > 10 * 1024 * 1024) throw new Error("Cover images cannot exceed 10 MB.");
         const extension = coverFile.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "jpg";
@@ -136,40 +192,51 @@ export default function CreateQuestPage() {
         coverMediaUrl = supabase.storage.from("quest-covers").getPublicUrl(uploadedCoverPath).data.publicUrl;
       }
 
-      const createdResponse = await fetch(apiUrl("/quests"), {
-        method: "POST",
+      const questPayload = {
+        title: title.trim(),
+        description: description.trim(),
+        organization_id: sponsoredByBusiness ? organization?.id ?? null : null,
+        cover_media_url: coverMediaUrl,
+        location_name: questType === "Explore" && locationReady ? locationName.trim() : null,
+        latitude: questType === "Explore" && locationReady ? latitude : null,
+        longitude: questType === "Explore" && locationReady ? longitude : null,
+        quest_type: questType.toUpperCase(),
+        visibility,
+        is_group_challenge: isGroup,
+        required_group_size: isGroup ? groupSize : null,
+        group_instructions: isGroup ? groupInstructions.trim() : null,
+        max_entries: maxEntries,
+        winner_count: winners,
+        winner_selection_method: selectionMethod === "First valid" ? "FIRST_VALID" : "BEST_SUBMISSION",
+        proof_requirements: proof.map((value) => value.toUpperCase().replace(" ", "_")),
+        judging_criteria: selectionMethod === "Best submission" ? judgingCriteria.trim() : null,
+        reward_enabled: rewardEnabled,
+        reward_amount_minor: rewardEnabled ? Math.round(rewardAmount * 100_000) : null,
+        reward_currency: rewardEnabled ? "NIM" : null,
+        settlement_asset: rewardEnabled ? "NIM" : null,
+        deadline: new Date(deadline).toISOString(),
+      };
+      const createdResponse = await fetch(apiUrl(editingQuestId ? `/quests/${editingQuestId}` : "/quests"), {
+        method: editingQuestId ? "PATCH" : "POST",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-          organization_id: sponsoredByBusiness ? organization?.id ?? null : null,
-          cover_media_url: coverMediaUrl,
-          location_name: questType === "Explore" && locationReady ? locationName.trim() : null,
-          latitude: questType === "Explore" && locationReady ? latitude : null,
-          longitude: questType === "Explore" && locationReady ? longitude : null,
-          quest_type: questType.toUpperCase(),
-          visibility,
-          is_group_challenge: isGroup,
-          required_group_size: isGroup ? groupSize : null,
-          group_instructions: isGroup ? groupInstructions.trim() : null,
-          max_entries: maxEntries,
-          winner_count: winners,
-          winner_selection_method: selectionMethod === "First valid" ? "FIRST_VALID" : "BEST_SUBMISSION",
-          proof_requirements: proof.map((value) => value.toUpperCase().replace(" ", "_")),
-          judging_criteria: selectionMethod === "Best submission" ? judgingCriteria.trim() : null,
-          reward_enabled: rewardEnabled,
-          reward_amount_minor: rewardEnabled ? Math.round(rewardAmount * 100_000) : null,
-          reward_currency: rewardEnabled ? "NIM" : null,
-          settlement_asset: rewardEnabled ? "NIM" : null,
-          deadline: new Date(deadline).toISOString(),
-        }),
+        body: JSON.stringify(questPayload),
       });
-      if (!createdResponse.ok) throw new Error(await readApiError(createdResponse, "The quest could not be created."));
+      if (!createdResponse.ok) throw new Error(await readApiError(createdResponse, editingQuestId ? "The draft could not be updated." : "The quest could not be created."));
       const created = await createdResponse.json() as Quest;
       draftCreated = true;
+
+      if (editingQuestId) {
+        for (const checkpointId of savedCheckpointIds) {
+          const response = await fetch(apiUrl(`/quests/${created.id}/checkpoints/${checkpointId}`), {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          if (!response.ok) throw new Error(await readApiError(response, "The saved checkpoints could not be updated."));
+        }
+      }
 
       if (checkpointsRequired) {
         for (const checkpoint of checkpoints) {
@@ -208,12 +275,14 @@ export default function CreateQuestPage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="flex items-center justify-between border-b border-line bg-white px-5 py-4 sm:px-8">
-        <Logo />
+        <div><Logo /><p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-muted">{editingQuestId ? "Editing draft" : "Create a quest"}</p></div>
         <Link href="/discover" aria-label="Close quest creator" className="grid h-10 w-10 place-items-center rounded-full border border-line"><X size={19} /></Link>
       </header>
 
       <div className="mx-auto grid max-w-6xl gap-8 px-5 py-7 lg:grid-cols-[minmax(0,1fr)_330px] lg:px-8 lg:py-10">
-        <section>
+        <section aria-busy={loadingDraft}>
+          {loadingDraft ? <div className="mb-5 flex items-center gap-2 rounded-xl bg-white p-4 text-sm font-semibold text-muted"><LoaderCircle size={17} className="animate-spin" />Loading saved draft…</div> : null}
+          {draftLoadError ? <div role="alert" className="mb-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]"><strong>Draft unavailable.</strong><br />{draftLoadError} <Link href="/quests" className="font-bold underline">Return to My quests</Link></div> : null}
           <div className="overflow-x-auto pb-3">
             <ol className="flex min-w-[620px] items-center">
               {stepNames.map((name, index) => (

@@ -163,6 +163,7 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(quests::get_quest)
             .service(quests::get_saved_quest_state)
             .service(quests::create_quest)
+            .service(quests::update_quest)
             .service(quests::publish_quest)
             .service(quests::join_quest)
             .service(quests::close_quest)
