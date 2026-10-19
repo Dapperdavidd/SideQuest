@@ -92,6 +92,8 @@ flutter run \
 pnpm lint:web
 pnpm build:web
 pnpm test:web:e2e
+pnpm test:nimiq-verifier
+pnpm test:nimiq-signer
 cargo test --manifest-path services/api/Cargo.toml
 flutter test apps/mobile
 ```
