@@ -53,11 +53,18 @@ export default function CreateQuestPage() {
   const [storedCoverUrl, setStoredCoverUrl] = useState<string | null>(null);
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
     let active = true;
     void createClient().auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return;
+      if (!active) return;
+      if (!session) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        router.replace(`/auth?next=${encodeURIComponent(next)}`);
+        return;
+      }
+      setCheckingAuth(false);
       void getMyOrganization(session.access_token)
         .then((value) => { if (active) setOrganization(value); })
         .catch(() => undefined);
@@ -110,7 +117,7 @@ export default function CreateQuestPage() {
       }
     });
     return () => { active = false; };
-  }, []);
+  }, [router]);
 
   const totalFunding = useMemo(() => rewardAmount * winners, [rewardAmount, winners]);
   const detailsValid = title.trim().length >= 3 && Boolean(description.trim()) && deadlineValid;
@@ -270,6 +277,10 @@ export default function CreateQuestPage() {
     } finally {
       setPublishing(false);
     }
+  }
+
+  if (checkingAuth) {
+    return <main className="grid min-h-screen place-items-center bg-background"><div role="status" className="flex items-center gap-3 text-sm font-semibold text-muted"><LoaderCircle size={19} className="animate-spin" />Checking your account…</div></main>;
   }
 
   return (

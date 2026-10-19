@@ -243,6 +243,15 @@ export function apiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
+const API_REQUEST_TIMEOUT_MS = 5_000;
+
+function apiFetch(url: string, init: RequestInit = {}) {
+  return fetch(url, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
+  });
+}
+
 export async function listQuests(filters: { search?: string; questType?: Quest["quest_type"]; latitude?: number; longitude?: number; radiusKm?: number } = {}, accessToken?: string): Promise<Quest[]> {
   const query = new URLSearchParams();
   if (filters.search?.trim()) query.set("search", filters.search.trim());
@@ -253,7 +262,7 @@ export async function listQuests(filters: { search?: string; questType?: Quest["
     query.set("radius_km", (filters.radiusKm ?? 25).toString());
   }
   const suffix = query.size ? `?${query.toString()}` : "";
-  const response = await fetch(apiUrl(`/quests${suffix}`), {
+  const response = await apiFetch(apiUrl(`/quests${suffix}`), {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     cache: "no-store",
   });
@@ -262,7 +271,7 @@ export async function listQuests(filters: { search?: string; questType?: Quest["
 }
 
 export async function getQuest(id: string, accessToken?: string): Promise<Quest | null> {
-  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(id)}`), {
+  const response = await apiFetch(apiUrl(`/quests/${encodeURIComponent(id)}`), {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     cache: "no-store",
   });
@@ -272,7 +281,7 @@ export async function getQuest(id: string, accessToken?: string): Promise<Quest 
 }
 
 export async function getQuestCheckpoints(id: string, accessToken?: string): Promise<QuestCheckpoint[]> {
-  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(id)}/checkpoints`), {
+  const response = await apiFetch(apiUrl(`/quests/${encodeURIComponent(id)}/checkpoints`), {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     cache: "no-store",
   });
@@ -281,7 +290,7 @@ export async function getQuestCheckpoints(id: string, accessToken?: string): Pro
 }
 
 export async function getQuestWinners(id: string): Promise<PublicWinner[]> {
-  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(id)}/winners`), {
+  const response = await apiFetch(apiUrl(`/quests/${encodeURIComponent(id)}/winners`), {
     cache: "no-store",
   });
   if (!response.ok) throw new Error("Unable to load quest winners right now.");
@@ -289,7 +298,7 @@ export async function getQuestWinners(id: string): Promise<PublicWinner[]> {
 }
 
 export async function getMyQuests(accessToken: string): Promise<MyQuestSummary[]> {
-  const response = await fetch(apiUrl("/users/me/quests"), {
+  const response = await apiFetch(apiUrl("/users/me/quests"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -298,7 +307,7 @@ export async function getMyQuests(accessToken: string): Promise<MyQuestSummary[]
 }
 
 export async function getSavedQuests(accessToken: string): Promise<MyQuestSummary[]> {
-  const response = await fetch(apiUrl("/users/me/saved-quests"), {
+  const response = await apiFetch(apiUrl("/users/me/saved-quests"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -307,7 +316,7 @@ export async function getSavedQuests(accessToken: string): Promise<MyQuestSummar
 }
 
 export async function getQuestSaved(questId: string, accessToken: string): Promise<boolean> {
-  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(questId)}/saved`), {
+  const response = await apiFetch(apiUrl(`/quests/${encodeURIComponent(questId)}/saved`), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -317,20 +326,20 @@ export async function getQuestSaved(questId: string, accessToken: string): Promi
 }
 
 export async function getPublicProfile(username: string): Promise<PublicProfile | null> {
-  const response = await fetch(apiUrl(`/users/${encodeURIComponent(username)}`), { cache: "no-store" });
+  const response = await apiFetch(apiUrl(`/users/${encodeURIComponent(username)}`), { cache: "no-store" });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Unable to load this profile right now.");
   return response.json() as Promise<PublicProfile>;
 }
 
 export async function getAchievements(username: string): Promise<Achievement[]> {
-  const response = await fetch(apiUrl(`/users/${encodeURIComponent(username)}/achievements`), { cache: "no-store" });
+  const response = await apiFetch(apiUrl(`/users/${encodeURIComponent(username)}/achievements`), { cache: "no-store" });
   if (!response.ok) return [];
   return response.json() as Promise<Achievement[]>;
 }
 
 export async function getCreatorAnalytics(accessToken: string): Promise<CreatorAnalytics> {
-  const response = await fetch(apiUrl("/users/me/creator-analytics"), {
+  const response = await apiFetch(apiUrl("/users/me/creator-analytics"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -339,7 +348,7 @@ export async function getCreatorAnalytics(accessToken: string): Promise<CreatorA
 }
 
 export async function getMyOrganization(accessToken: string): Promise<Organization | null> {
-  const response = await fetch(apiUrl("/users/me/organization"), {
+  const response = await apiFetch(apiUrl("/users/me/organization"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -349,7 +358,7 @@ export async function getMyOrganization(accessToken: string): Promise<Organizati
 }
 
 export async function getOrganization(slug: string, accessToken?: string): Promise<Organization | null> {
-  const response = await fetch(apiUrl(`/organizations/${encodeURIComponent(slug)}`), {
+  const response = await apiFetch(apiUrl(`/organizations/${encodeURIComponent(slug)}`), {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     cache: "no-store",
   });
@@ -359,13 +368,13 @@ export async function getOrganization(slug: string, accessToken?: string): Promi
 }
 
 export async function getOrganizationQuests(slug: string): Promise<OrganizationQuest[]> {
-  const response = await fetch(apiUrl(`/organizations/${encodeURIComponent(slug)}/quests`), { cache: "no-store" });
+  const response = await apiFetch(apiUrl(`/organizations/${encodeURIComponent(slug)}/quests`), { cache: "no-store" });
   if (!response.ok) return [];
   return response.json() as Promise<OrganizationQuest[]>;
 }
 
 export async function getOrganizationAnalytics(id: string, accessToken: string): Promise<CreatorAnalytics> {
-  const response = await fetch(apiUrl(`/organizations/${encodeURIComponent(id)}/analytics`), {
+  const response = await apiFetch(apiUrl(`/organizations/${encodeURIComponent(id)}/analytics`), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -374,7 +383,7 @@ export async function getOrganizationAnalytics(id: string, accessToken: string):
 }
 
 export async function getFollowState(userId: string, accessToken: string): Promise<boolean> {
-  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/follow-state`), {
+  const response = await apiFetch(apiUrl(`/users/${encodeURIComponent(userId)}/follow-state`), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -384,7 +393,7 @@ export async function getFollowState(userId: string, accessToken: string): Promi
 }
 
 export async function getBlockState(userId: string, accessToken: string): Promise<boolean> {
-  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/block-state`), {
+  const response = await apiFetch(apiUrl(`/users/${encodeURIComponent(userId)}/block-state`), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -394,19 +403,19 @@ export async function getBlockState(userId: string, accessToken: string): Promis
 }
 
 export async function getFollowers(userId: string): Promise<PublicProfile[]> {
-  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/followers`), { cache: "no-store" });
+  const response = await apiFetch(apiUrl(`/users/${encodeURIComponent(userId)}/followers`), { cache: "no-store" });
   if (!response.ok) throw new Error("Unable to load followers right now.");
   return response.json() as Promise<PublicProfile[]>;
 }
 
 export async function getFollowing(userId: string): Promise<PublicProfile[]> {
-  const response = await fetch(apiUrl(`/users/${encodeURIComponent(userId)}/following`), { cache: "no-store" });
+  const response = await apiFetch(apiUrl(`/users/${encodeURIComponent(userId)}/following`), { cache: "no-store" });
   if (!response.ok) throw new Error("Unable to load followed profiles right now.");
   return response.json() as Promise<PublicProfile[]>;
 }
 
 export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]> {
-  const response = await fetch(apiUrl("/users/me/payouts"), {
+  const response = await apiFetch(apiUrl("/users/me/payouts"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -415,7 +424,7 @@ export async function getMyPayouts(accessToken: string): Promise<PayoutSummary[]
 }
 
 export async function getQuestSettlement(questId: string, accessToken: string): Promise<QuestSettlement> {
-  const response = await fetch(apiUrl(`/quests/${encodeURIComponent(questId)}/settlement`), {
+  const response = await apiFetch(apiUrl(`/quests/${encodeURIComponent(questId)}/settlement`), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -424,7 +433,7 @@ export async function getQuestSettlement(questId: string, accessToken: string): 
 }
 
 export async function getNotifications(accessToken: string): Promise<AppNotification[]> {
-  const response = await fetch(apiUrl("/users/me/notifications"), {
+  const response = await apiFetch(apiUrl("/users/me/notifications"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
@@ -433,7 +442,7 @@ export async function getNotifications(accessToken: string): Promise<AppNotifica
 }
 
 export async function getUnreadNotificationCount(accessToken: string): Promise<number> {
-  const response = await fetch(apiUrl("/users/me/notifications/unread-count"), {
+  const response = await apiFetch(apiUrl("/users/me/notifications/unread-count"), {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });

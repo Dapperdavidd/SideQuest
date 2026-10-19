@@ -6,6 +6,7 @@
     "dev:web": "pnpm --dir apps/web dev",
     "build:web": "pnpm --dir apps/web build",
     "lint:web": "pnpm --dir apps/web lint",
+    "test:web:e2e": "pnpm --dir apps/web test:e2e",
     "dev:nimiq-verifier": "pnpm --dir services/nimiq-verifier dev",
     "test:nimiq-verifier": "pnpm --dir services/nimiq-verifier test",
     "start:nimiq-signer": "pnpm --dir services/nimiq-signer start",

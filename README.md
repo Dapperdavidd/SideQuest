@@ -91,11 +91,12 @@ flutter run \
 ```bash
 pnpm lint:web
 pnpm build:web
+pnpm test:web:e2e
 cargo test --manifest-path services/api/Cargo.toml
 flutter test apps/mobile
 ```
 
-The same formatting, test, analysis, lint, and production-build checks run automatically on every push to `main` and on pull requests through `.github/workflows/ci.yml`.
+The same formatting, unit-test, analysis, lint, production-build, and desktop/mobile Chromium checks run automatically on every push to `main` and on pull requests through `.github/workflows/ci.yml`.
 
 ## Configuration
 
