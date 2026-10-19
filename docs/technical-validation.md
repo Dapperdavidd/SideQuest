@@ -9,12 +9,17 @@
 - Wallet requests require explicit native user approval and do not expose private keys to the mini app.
 - Supabase Auth supports Next.js SSR, Flutter, Google, Apple, and email authentication.
 
+## Development setup confirmed
+
+- Supabase project URL, publishable key, database connection, migrations, and redirect allow list are configured for the development environment.
+- Google OAuth is configured through Supabase and the browser sign-in flow has completed successfully.
+- The dedicated TestAlbatross treasury and local payout signer are configured for direct NIM rewards.
+
 ## External setup still required
 
-- Supabase project URL and publishable key.
-- Google OAuth project/client configuration and allowed redirect URLs.
 - Apple Developer Team ID, Services ID, App ID/bundle identifier, Sign in with Apple capability, and signing key.
 - Production domains and callback URLs.
+- Production hosting accounts, secret stores, and observability destinations.
 - Nimiq competition registration/submission details and production settlement accounts.
 - Legal review for contests, incentivized promotional content, crypto settlement, custody, and Nigerian payment flows.
 

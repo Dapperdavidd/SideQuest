@@ -112,3 +112,5 @@ Monetary quests remain `AWAITING_FUNDING` until the API independently verifies t
 Unpublished quest drafts are resumable from **My quests** on both web and mobile. Draft rules can be changed only by the creator and become immutable as soon as the quest is published or enters reward funding.
 
 See [architecture](docs/architecture.md) and [technical validation](docs/technical-validation.md) for the current engineering decisions and external setup requirements.
+
+For production images, health checks, environment boundaries, rollout order, and rollback rules, see the [deployment runbook](docs/deployment.md).

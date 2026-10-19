@@ -1,0 +1,15 @@
+.git
+.github
+.project-journal
+**/.DS_Store
+**/.env
+**/.env.*
+**/node_modules
+**/.next
+**/.dart_tool
+**/build
+**/target
+**/.runtime
+**/*.log
+apps/mobile
+services/nimiq-signer
