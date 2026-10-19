@@ -1340,6 +1340,11 @@ class MyQuest {
     required this.rewardEnabled,
     required this.rewardAmountMinor,
     required this.rewardCurrency,
+    required this.viewerEntryId,
+    required this.viewerEntryStatus,
+    required this.viewerReviewReason,
+    required this.viewerIsWinner,
+    required this.viewerPayoutStatus,
   });
 
   factory MyQuest.fromJson(Map<String, dynamic> json) => MyQuest(
@@ -1355,6 +1360,11 @@ class MyQuest {
     rewardEnabled: json['reward_enabled'] as bool,
     rewardAmountMinor: (json['reward_amount_minor'] as num?)?.toInt(),
     rewardCurrency: json['reward_currency'] as String?,
+    viewerEntryId: json['viewer_entry_id'] as String?,
+    viewerEntryStatus: json['viewer_entry_status'] as String?,
+    viewerReviewReason: json['viewer_review_reason'] as String?,
+    viewerIsWinner: json['viewer_is_winner'] as bool? ?? false,
+    viewerPayoutStatus: json['viewer_payout_status'] as String?,
   );
 
   final String id;
@@ -1369,6 +1379,11 @@ class MyQuest {
   final bool rewardEnabled;
   final int? rewardAmountMinor;
   final String? rewardCurrency;
+  final String? viewerEntryId;
+  final String? viewerEntryStatus;
+  final String? viewerReviewReason;
+  final bool viewerIsWinner;
+  final String? viewerPayoutStatus;
 
   bool get isCreator => relationship == 'CREATOR';
   bool get isSaved => relationship == 'SAVED';
@@ -7415,6 +7430,12 @@ class _MyQuestCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (!quest.isCreator &&
+                !quest.isSaved &&
+                quest.viewerEntryId != null) ...[
+              const SizedBox(height: 12),
+              _ParticipantEntryOutcome(quest: quest),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [
@@ -7449,6 +7470,93 @@ class _MyQuestCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ParticipantEntryOutcome extends StatelessWidget {
+  const _ParticipantEntryOutcome({required this.quest});
+
+  final MyQuest quest;
+
+  @override
+  Widget build(BuildContext context) {
+    late final IconData icon;
+    late final Color color;
+    late final Color surface;
+    late final String title;
+    late final String detail;
+
+    if (quest.viewerIsWinner) {
+      icon = Icons.emoji_events_rounded;
+      color = const Color(0xFF3F5600);
+      surface = const Color(0xFFE9FFB0);
+      title = 'You won this quest';
+      detail = quest.viewerPayoutStatus != null
+          ? 'Reward payout: ${quest.viewerPayoutStatus!.toLowerCase()}.'
+          : quest.rewardEnabled
+          ? 'Your reward is being prepared.'
+          : 'You earned the winning place.';
+    } else if (quest.viewerEntryStatus == 'INVALID') {
+      icon = Icons.cancel_outlined;
+      color = const Color(0xFF8F2E1E);
+      surface = const Color(0xFFFFF0ED);
+      title = 'Entry not accepted';
+      detail =
+          quest.viewerReviewReason ?? 'The creator marked this entry invalid.';
+    } else if (quest.viewerEntryStatus == 'VALID' &&
+        quest.status == 'FINALIZED') {
+      icon = Icons.check_circle_outline_rounded;
+      color = muted;
+      surface = background;
+      title = 'Valid entry · not selected';
+      detail = 'Your entry met the rules but was not a winning entry.';
+    } else if (quest.viewerEntryStatus == 'VALID') {
+      icon = Icons.check_circle_outline_rounded;
+      color = const Color(0xFF3F5600);
+      surface = const Color(0xFFE9FFB0);
+      title = 'Entry marked valid';
+      detail = 'Final results are still pending.';
+    } else {
+      icon = Icons.schedule_rounded;
+      color = muted;
+      surface = background;
+      title = 'Entry submitted';
+      detail = 'Waiting for creator review.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 19),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detail,
+                  style: TextStyle(
+                    color: color.withValues(alpha: .72),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

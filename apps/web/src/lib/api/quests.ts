@@ -162,6 +162,11 @@ export type MyQuestSummary = {
   reward_amount_minor: number | null;
   reward_currency: string | null;
   published_at: string | null;
+  viewer_entry_id: string | null;
+  viewer_entry_status: "SUBMITTED" | "UNDER_REVIEW" | "VALID" | "INVALID" | null;
+  viewer_review_reason: string | null;
+  viewer_is_winner: boolean;
+  viewer_payout_status: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | null;
 };
 
 export type PayoutSummary = {

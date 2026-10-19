@@ -314,7 +314,7 @@ paths:
         - bearerAuth: []
       responses:
         "200":
-          description: Related quests ordered by latest creation or publishing activity
+          description: Related quests ordered by latest activity, including the authenticated participant's authoritative entry, review, winner, and payout status
         "401":
           description: Missing, invalid, or expired access token
   /users/me/saved-quests:

@@ -250,6 +250,11 @@ pub struct MyQuestSummary {
     reward_amount_minor: Option<i64>,
     reward_currency: Option<String>,
     published_at: Option<DateTime<Utc>>,
+    viewer_entry_id: Option<Uuid>,
+    viewer_entry_status: Option<String>,
+    viewer_review_reason: Option<String>,
+    viewer_is_winner: bool,
+    viewer_payout_status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -563,9 +568,26 @@ pub async fn list_my_quests(
                q.reward_enabled,
                q.reward_amount_minor,
                q.reward_currency::text as reward_currency,
-               q.published_at
+               q.published_at,
+               viewer_entry.id as viewer_entry_id,
+               case
+                 when viewer_review.is_valid is true then 'VALID'
+                 when viewer_review.is_valid is false then 'INVALID'
+                 else viewer_entry.status::text
+               end as viewer_entry_status,
+               viewer_review.reason as viewer_review_reason,
+               (viewer_winner.id is not null) as viewer_is_winner,
+               viewer_payout.status::text as viewer_payout_status
         from related_quests related
         join public.quests q on q.id = related.id
+        left join public.quest_entries viewer_entry
+          on viewer_entry.quest_id = q.id
+         and viewer_entry.participant_id = $1
+         and related.relationship = 'PARTICIPANT'
+        left join public.entry_reviews viewer_review on viewer_review.entry_id = viewer_entry.id
+        left join public.quest_winners viewer_winner on viewer_winner.entry_id = viewer_entry.id
+        left join public.reward_allocations viewer_allocation on viewer_allocation.winner_id = viewer_winner.id
+        left join public.payouts viewer_payout on viewer_payout.reward_allocation_id = viewer_allocation.id
         order by coalesce(q.published_at, q.created_at) desc
         "#,
     )
@@ -597,7 +619,12 @@ pub async fn list_saved_quests(
                q.reward_enabled,
                q.reward_amount_minor,
                q.reward_currency::text as reward_currency,
-               q.published_at
+               q.published_at,
+               null::uuid as viewer_entry_id,
+               null::text as viewer_entry_status,
+               null::text as viewer_review_reason,
+               false as viewer_is_winner,
+               null::text as viewer_payout_status
         from public.saved_quests saved
         join public.quests q on q.id = saved.quest_id
         where saved.user_id = $1
