@@ -23,8 +23,9 @@ import {
   questImageClass,
   type Quest,
 } from "@/lib/api/quests";
-import { getViewer } from "@/lib/auth/viewer";
+import { getViewerForUser } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
+import { DiscoverFilters } from "./discover-filters";
 import { NearbyButton } from "./nearby-button";
 
 type DiscoverPageProps = {
@@ -63,7 +64,9 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
     && longitude <= 180;
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  const viewerPromise = getViewer();
+  const viewerPromise = session?.user
+    ? getViewerForUser(supabase, session.user)
+    : Promise.resolve(null);
   const questsPromise = listQuests({
     search,
     questType,
@@ -102,7 +105,7 @@ async function DiscoverExperience({ searchParams }: DiscoverPageProps) {
           <div className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="min-w-0 px-5 py-7 sm:px-8">
               <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-white/45">{viewer ? `Welcome back, ${firstName}` : "Browse freely as a guest"}</p><h1 className="mt-1 font-display text-3xl font-bold tracking-tight">What will you do today?</h1></div><Link href={viewer ? "/create" : "/auth?next=/create"} className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark">{viewer ? "Create a quest" : "Sign in to create"}</Link></div>
-              <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{filters.map(([label, value]) => { const selected = (questType ?? "") === value && !nearby; const params = new URLSearchParams(); if (search) params.set("q", search); if (value) params.set("type", value); return <Link key={label} href={`/discover${params.size ? `?${params.toString()}` : ""}`} className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${selected ? "bg-accent text-dark" : "border border-white/10 text-white/60"}`}>{label}</Link>; })}<NearbyButton active={nearby} search={search} /></div>
+              <div className="mt-7 flex gap-2 overflow-x-auto pb-2"><DiscoverFilters activeType={nearby ? undefined : questType} search={search} /><NearbyButton active={nearby} search={search} /></div>
 
               {featured ? <FeaturedQuest quest={featured} /> : null}
 

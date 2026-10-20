@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 export type Viewer = {
   id: string;
@@ -17,6 +18,13 @@ export async function getViewer(): Promise<Viewer | null> {
 
   if (!user) return null;
 
+  return getViewerForUser(supabase, user);
+}
+
+export async function getViewerForUser(
+  supabase: SupabaseClient,
+  user: User,
+): Promise<Viewer> {
   const { data: profile } = await supabase
     .from("users")
     .select("username, display_name, bio, avatar_url")
