@@ -28,11 +28,9 @@ export default defineRailway(() => {
     deploy: {
       healthcheckPath: "/health",
       healthcheckTimeout: 120,
-      sleepApplication: false,
-      restartPolicyType: "ON_FAILURE",
-      restartPolicyMaxRetries: 10,
     },
     env: {
+      PORT: "8090",
       VERIFIER_HOST: "0.0.0.0",
       VERIFIER_PORT: "8090",
       VERIFIER_SHARED_TOKEN: preserve(),
@@ -56,9 +54,6 @@ export default defineRailway(() => {
     deploy: {
       healthcheckPath: "/health",
       healthcheckTimeout: 120,
-      sleepApplication: false,
-      restartPolicyType: "ON_FAILURE",
-      restartPolicyMaxRetries: 10,
     },
     env: {
       API_HOST: "0.0.0.0",
