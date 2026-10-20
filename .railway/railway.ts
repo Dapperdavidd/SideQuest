@@ -58,7 +58,8 @@ export default defineRailway(() => {
     env: {
       API_HOST: "0.0.0.0",
       API_PORT: "8080",
-      API_ALLOWED_ORIGINS: preserve(),
+      API_ALLOWED_ORIGINS:
+        "http://localhost:3000,https://web-mu-one-34.vercel.app",
       DATABASE_URL: preserve(),
       DATABASE_MAX_CONNECTIONS: "5",
       SUPABASE_JWKS_URL: preserve(),
