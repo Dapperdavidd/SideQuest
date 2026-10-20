@@ -3,8 +3,8 @@ FROM rust:1.95-bookworm AS builder
 WORKDIR /build
 COPY services/api/Cargo.toml services/api/Cargo.lock ./
 COPY services/api/src ./src
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
+RUN --mount=type=cache,id=sidequest-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=sidequest-api-target,target=/build/target \
     cargo build --release --locked \
     && cp /build/target/release/api /tmp/sidequest-api
 

@@ -11,7 +11,7 @@ RUN apt-get update \
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY services/nimiq-verifier/package.json services/nimiq-verifier/package.json
-RUN --mount=type=cache,target=/pnpm/store \
+RUN --mount=type=cache,id=sidequest-pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --filter @sidequest/nimiq-verifier...
 
 FROM node:24-bookworm-slim AS runtime

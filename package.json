@@ -15,6 +15,7 @@
     "test:mobile": "flutter test apps/mobile"
   },
   "devDependencies": {
+    "railway": "^3.16.0",
     "supabase": "^2.120.0"
   }
 }
