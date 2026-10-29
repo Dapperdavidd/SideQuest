@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { Apple, LoaderCircle, Mail } from "lucide-react";
+import { LoaderCircle, Mail } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
@@ -18,12 +18,12 @@ export default function AuthPage() {
     return requested?.startsWith("/") && !requested.startsWith("//") ? requested : "/discover";
   }
 
-  async function signInWithProvider(provider: "google" | "apple") {
+  async function signInWithGoogle() {
     if (!configured) return setMessage("Add the Supabase project credentials to enable sign-in.");
     setLoading(true);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
-      provider,
+      provider: "google",
       options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination())}` },
     });
     if (error) {
@@ -51,8 +51,7 @@ export default function AuthPage() {
         <h1 className="mt-10 font-display text-3xl font-bold tracking-tight">Welcome to SideQuest</h1>
         <p className="mx-auto mt-3 max-w-xs text-sm leading-6 text-muted">Create your account to join quests, submit entries, and make everyday life more interesting.</p>
         <div className="mt-8 space-y-3">
-          <button disabled={loading} onClick={() => signInWithProvider("google")} className="flex w-full items-center justify-center gap-3 rounded-full border border-line px-5 py-3.5 font-semibold transition hover:bg-background disabled:opacity-50"><span className="text-lg font-bold text-[#4285F4]">G</span>Continue with Google</button>
-          <button disabled={loading} onClick={() => signInWithProvider("apple")} className="flex w-full items-center justify-center gap-3 rounded-full border border-line px-5 py-3.5 font-semibold transition hover:bg-background disabled:opacity-50"><Apple size={19} fill="currentColor" />Continue with Apple</button>
+          <button disabled={loading} onClick={signInWithGoogle} className="flex w-full items-center justify-center gap-3 rounded-full border border-line px-5 py-3.5 font-semibold transition hover:bg-background disabled:opacity-50"><span className="text-lg font-bold text-[#4285F4]">G</span>Continue with Google</button>
           <button disabled={loading} onClick={() => setEmailOpen((value) => !value)} className="flex w-full items-center justify-center gap-3 rounded-full border border-line px-5 py-3.5 font-semibold transition hover:bg-background disabled:opacity-50"><Mail size={19} />Continue with email</button>
         </div>
         {emailOpen ? (

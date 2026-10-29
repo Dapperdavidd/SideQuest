@@ -5581,15 +5581,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: null,
-              icon: const Icon(Icons.apple),
-              label: const Text('Apple sign-in requires setup'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(54),
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
               onPressed: loading
                   ? null
                   : () => setState(() => emailOpen = !emailOpen),
