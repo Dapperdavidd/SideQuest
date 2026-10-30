@@ -9,6 +9,7 @@ test("cinematic landing page introduces the SideQuest experience", async ({ page
   await expect(page.getByRole("button", { name: "Decline quest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Accept quest" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /three ways to play/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Start your first side quest" })).toHaveAttribute("href", "/discover");
 });
 
 test("public app launch action opens the coming-soon experience", async ({ page }) => {

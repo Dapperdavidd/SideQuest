@@ -77,6 +77,35 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background-image: url("https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=1100&q=88");
 }
 
+.landing-quest-sunset {
+  background:
+    radial-gradient(circle at 68% 26%, rgba(255, 232, 153, 0.95) 0 7%, transparent 8%),
+    linear-gradient(155deg, transparent 0 50%, rgba(13, 22, 20, 0.88) 51%),
+    linear-gradient(120deg, #ef8354 0%, #8f5bd7 47%, #172026 100%);
+}
+
+.landing-quest-cafe {
+  background:
+    radial-gradient(circle at 22% 32%, rgba(216, 255, 50, 0.9) 0 9%, transparent 10%),
+    repeating-linear-gradient(110deg, transparent 0 42px, rgba(255, 255, 255, 0.08) 43px 44px),
+    linear-gradient(145deg, #5f321d 0%, #bd6a37 48%, #18120f 100%);
+}
+
+.landing-quest-route {
+  background:
+    radial-gradient(circle at 76% 24%, rgba(154, 230, 255, 0.9) 0 8%, transparent 9%),
+    linear-gradient(35deg, transparent 0 44%, rgba(216, 255, 50, 0.65) 45% 47%, transparent 48%),
+    linear-gradient(145deg, #1a283b 0%, #315c6d 52%, #0e1212 100%);
+}
+
+.quest-glass-cursor {
+  width: 2.15rem;
+  height: 2.65rem;
+  clip-path: polygon(0 0, 100% 48%, 42% 66%);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(216, 255, 50, 0.45));
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+}
+
 .landing-bounce {
   animation: landing-bounce 1.6s ease-in-out infinite;
 }

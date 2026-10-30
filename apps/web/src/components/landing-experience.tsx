@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Bike,
   Camera,
+  Check,
   Coffee,
   Compass,
   Footprints,
@@ -13,6 +14,7 @@ import {
   Sparkles,
   Trophy,
   UsersRound,
+  X,
   Zap,
 } from "lucide-react";
 import {
@@ -27,7 +29,7 @@ import { QuestNotificationBanner } from "@/components/quest-notification-banner"
 
 const questModes = [
   {
-    number: "01",
+    number: "one",
     title: "With your people",
     label: "Friends",
     description: "Drop a challenge into the group chat and make the ordinary competitive.",
@@ -35,7 +37,7 @@ const questModes = [
     className: "landing-card-friends",
   },
   {
-    number: "02",
+    number: "two",
     title: "For the reward",
     label: "Bounties",
     description: "Complete creative quests from local brands, creators and communities.",
@@ -43,7 +45,7 @@ const questModes = [
     className: "landing-card-bounty",
   },
   {
-    number: "03",
+    number: "three",
     title: "Out in the world",
     label: "Explore",
     description: "Follow the pin, discover a place and come back with a story.",
@@ -68,9 +70,9 @@ const activityTokens = [
 ] as const;
 
 const swipeQuests = [
-  { title: "Golden hour, one frame", kicker: "Photo quest", detail: "Catch the last beam of sunlight before it slips behind the city.", reward: "12 NIM", distance: "0.8 km", className: "landing-card-explore" },
-  { title: "The café nobody knows", kicker: "Discovery quest", detail: "Follow three clues and order the drink waiting at the final stop.", reward: "15 NIM", distance: "1.4 km", className: "landing-card-bounty" },
-  { title: "A stranger picks the route", kicker: "Friends quest", detail: "Let the group vote. Take the winning path without checking the map.", reward: "8 NIM", distance: "2.1 km", className: "landing-card-friends" },
+  { title: "Golden hour, one frame", kicker: "Photo quest", detail: "Catch the last beam of sunlight before it slips behind the city.", reward: "12 NIM", distance: "0.8 km", className: "landing-quest-sunset", mark: "SUN / 01" },
+  { title: "The café nobody knows", kicker: "Discovery quest", detail: "Follow three clues and order the drink waiting at the final stop.", reward: "15 NIM", distance: "1.4 km", className: "landing-quest-cafe", mark: "BREW / 02" },
+  { title: "A stranger picks the route", kicker: "Friends quest", detail: "Let the group vote. Take the winning path without checking the map.", reward: "8 NIM", distance: "2.1 km", className: "landing-quest-route", mark: "GO / 03" },
 ] as const;
 
 export function LandingExperience() {
@@ -137,7 +139,7 @@ export function LandingExperience() {
           </Link>
           <div className="flex items-center gap-2 sm:gap-3">
             <a href="#how-it-plays" className="hidden rounded-full px-5 py-3 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-white/75 transition hover:text-white sm:block">
-              How it plays
+              Three ways
             </a>
             <Link href="/coming-soon" className="group flex items-center gap-3 rounded-full border border-white/30 bg-black/20 px-4 py-3 text-[0.66rem] font-bold uppercase tracking-[0.16em] text-white backdrop-blur-md transition hover:border-[#d8ff32] hover:bg-[#d8ff32] hover:text-black sm:px-5">
               Open app <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" />
@@ -212,6 +214,7 @@ export function LandingExperience() {
             </motion.div>
           ))}
         </div>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-20 bg-gradient-to-b from-transparent via-[#090a09]/80 to-[#090a09]" />
       </section>
 
       <section id="dispatch" ref={dispatchRef} className="relative min-h-[105svh] bg-[#090a09] text-white">
@@ -227,8 +230,8 @@ export function LandingExperience() {
               </motion.h2>
               <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 0.25 }} className="mt-8 max-w-md text-base leading-7 text-white/60">Every ping is a choice. Swipe left to decline. Swipe right to accept the quest and step into the story.</motion.p>
               <div className="mt-8 flex gap-3">
-                <button type="button" onClick={() => advanceSwipe(-1)} className="rounded-full border border-white/20 bg-white/5 px-5 py-3 text-[0.62rem] font-black uppercase tracking-[0.18em] text-white/65 backdrop-blur-xl transition hover:bg-white/15" aria-label="Decline quest">← Decline</button>
-                <button type="button" onClick={() => advanceSwipe(1)} className="rounded-full bg-[#d8ff32] px-5 py-3 text-[0.62rem] font-black uppercase tracking-[0.18em] text-black transition hover:scale-105" aria-label="Accept quest">Accept →</button>
+                <button type="button" onClick={() => advanceSwipe(-1)} className="flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-5 py-3 text-[0.62rem] font-black uppercase tracking-[0.18em] text-white/65 backdrop-blur-xl transition hover:bg-white/15" aria-label="Decline quest"><X size={14} /> Decline</button>
+                <button type="button" onClick={() => advanceSwipe(1)} className="flex items-center gap-2 rounded-full bg-[#d8ff32] px-5 py-3 text-[0.62rem] font-black uppercase tracking-[0.18em] text-black transition hover:scale-105" aria-label="Accept quest"><Check size={14} /> Accept</button>
               </div>
             </div>
 
@@ -236,7 +239,7 @@ export function LandingExperience() {
               <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[-5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.055]" />
               <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.055]" />
               <div className="absolute inset-0 rounded-[2.6rem] border border-white/15 bg-white/[0.07] p-3 shadow-[0_32px_90px_rgba(0,0,0,.48)] backdrop-blur-lg sm:p-5">
-                <div className="flex items-center justify-between px-3 py-2 text-[0.56rem] font-black uppercase tracking-[0.22em] text-white/45"><span>Decline ←</span><span>Quest {swipeIndex + 1} / {swipeQuests.length}</span><span>→ Accept</span></div>
+                <div className="flex items-center justify-between px-3 py-2 text-[0.56rem] font-black uppercase tracking-[0.22em] text-white/45"><span>Decline ←</span><span>{swipeIndex + 1} / {swipeQuests.length}</span><span>→ Accept</span></div>
                 <div className="relative mt-2 h-[27rem] overflow-hidden rounded-[2rem]">
                   <AnimatePresence mode="popLayout" custom={swipeDirection}>
                     <motion.article
@@ -254,6 +257,7 @@ export function LandingExperience() {
                       className={`${swipeQuests[swipeIndex].className} absolute inset-0 cursor-grab touch-pan-y overflow-hidden rounded-[2rem] bg-cover bg-center will-change-transform active:cursor-grabbing`}
                     >
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,9,8,.08),rgba(8,9,8,.9))]" />
+                      <div aria-hidden="true" className="absolute right-6 top-20 font-display text-[clamp(5rem,10vw,9rem)] font-black leading-none tracking-[-0.1em] text-white/[0.12]">{swipeQuests[swipeIndex].mark}</div>
                       <div className="relative flex h-full flex-col justify-between p-6 sm:p-8">
                         <div className="flex items-center justify-between"><span className="rounded-full border border-white/25 bg-black/20 px-3 py-2 text-[0.56rem] font-black uppercase tracking-[0.2em] backdrop-blur-xl">{swipeQuests[swipeIndex].kicker}</span><span className="grid size-11 place-items-center rounded-full bg-[#d8ff32] text-black"><Zap size={18} /></span></div>
                         <div>
@@ -264,6 +268,17 @@ export function LandingExperience() {
                       </div>
                     </motion.article>
                   </AnimatePresence>
+                  <motion.div
+                    key={`cursor-${swipeIndex}-${swipeDirection}`}
+                    aria-hidden="true"
+                    initial={{ opacity: 0, x: 0, y: 15, rotate: -12 }}
+                    animate={prefersReducedMotion ? { opacity: 0 } : { opacity: [0, 1, 1, 0], x: [0, 0, swipeDirection * 115, swipeDirection * 155], y: [15, 0, 0, -8], rotate: [-12, -8, swipeDirection * 8, swipeDirection * 14] }}
+                    transition={{ duration: 1.45, delay: 0.35, times: [0, 0.18, 0.72, 1], ease: [0.16, 1, 0.3, 1] }}
+                    className="pointer-events-none absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2"
+                  >
+                    <span className="quest-glass-cursor block" />
+                    <span className="mt-1 block rounded-full border border-white/20 bg-black/40 px-3 py-1 text-[0.48rem] font-black uppercase tracking-[0.2em] text-white backdrop-blur-md">{swipeDirection > 0 ? "Accept" : "Decline"}</span>
+                  </motion.div>
                 </div>
               </div>
             </motion.div>
@@ -334,11 +349,20 @@ export function LandingExperience() {
       <section className="relative isolate grid min-h-[100svh] min-h-[100dvh] w-full place-items-center overflow-hidden bg-[#10110e] px-5 py-16 text-center sm:py-24">
         <div aria-hidden="true" className="absolute left-1/2 top-1/2 size-[52rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#d8ff32]/15" />
         <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { rotate: 360 }} transition={{ duration: 34, repeat: Infinity, ease: "linear" }} className="absolute left-1/2 top-1/2 size-[38rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-[#d8ff32]/25" />
+        <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { rotate: -360, scale: [1, 1.04, 1] }} transition={{ rotate: { duration: 48, repeat: Infinity, ease: "linear" }, scale: { duration: 5, repeat: Infinity, ease: "easeInOut" } }} className="absolute left-1/2 top-1/2 size-[26rem] -translate-x-1/2 -translate-y-1/2 rounded-[42%] border border-[#d8ff32]/10 sm:size-[31rem]" />
+        <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { y: [0, -18, 0], rotate: [-8, 3, -8] }} transition={{ duration: 5.5, repeat: Infinity, ease: "easeInOut" }} className="absolute left-[7%] top-[16%] hidden -rotate-6 text-left sm:block">
+          <p className="font-display text-3xl font-black uppercase leading-none text-[#d8ff32]">Go this way</p>
+          <p className="mt-2 text-6xl font-extralight text-white/55">↘</p>
+        </motion.div>
+        <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { y: [0, 14, 0], x: [0, -8, 0] }} transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }} className="absolute right-[8%] top-[18%] hidden rounded-full border border-white/15 px-5 py-3 text-[0.55rem] font-black uppercase tracking-[0.3em] text-white/45 sm:block">Side quest / 001</motion.div>
+        <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { y: [0, -10, 0], rotate: [9, -5, 9] }} transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut" }} className="absolute bottom-[17%] left-[10%] hidden items-center gap-3 text-[#d8ff32] sm:flex"><Footprints size={25} /><span className="text-[0.58rem] font-black uppercase tracking-[0.24em]">collect the story</span></motion.div>
+        <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { scale: [1, 1.22, 1], rotate: [0, 18, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }} className="absolute bottom-[18%] right-[11%] hidden size-16 place-items-center rounded-full border border-[#d8ff32]/30 text-[#d8ff32] sm:grid"><Camera size={22} /></motion.div>
+        <motion.p aria-hidden="true" animate={prefersReducedMotion ? undefined : { x: [-6, 8, -6] }} transition={{ duration: 4.6, repeat: Infinity, ease: "easeInOut" }} className="absolute bottom-[8%] right-[22%] hidden -rotate-3 font-display text-2xl font-black uppercase text-white/20 lg:block">say yes →</motion.p>
         <div className="relative z-10 max-w-5xl">
           <Sparkles className="mx-auto text-[#d8ff32]" size={34} />
           <motion.h2 initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.88 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.8 }} className="mt-8 font-display text-[clamp(4rem,9vw,9rem)] font-black uppercase leading-[0.8] tracking-[-0.08em]">Your next story<br /><span className="text-[#d8ff32]">is out there.</span></motion.h2>
           <p className="mx-auto mt-8 max-w-lg text-base leading-7 text-white/55">We are tuning the last level before SideQuest opens to everyone.</p>
-          <Link href="/coming-soon" className="group mx-auto mt-10 flex w-fit items-center gap-5 rounded-full bg-[#d8ff32] px-8 py-5 text-sm font-black uppercase tracking-[0.2em] text-black transition hover:scale-105">Open app <ArrowRight size={18} className="transition-transform group-hover:translate-x-2" /></Link>
+          <Link href="/discover" className="group mx-auto mt-10 flex w-fit items-center gap-5 rounded-full bg-[#d8ff32] px-8 py-5 text-sm font-black uppercase tracking-[0.16em] text-black transition hover:scale-105">Start your first side quest <ArrowRight size={18} className="transition-transform group-hover:translate-x-2" /></Link>
         </div>
       </section>
     </main>
