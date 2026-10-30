@@ -331,7 +331,7 @@ export function LandingExperience() {
         </div>
       </section>
 
-      <section className="relative grid min-h-[95svh] place-items-center overflow-hidden bg-[#10110e] px-5 py-24 text-center">
+      <section className="relative isolate grid min-h-[100svh] min-h-[100dvh] w-full place-items-center overflow-hidden bg-[#10110e] px-5 py-16 text-center sm:py-24">
         <div aria-hidden="true" className="absolute left-1/2 top-1/2 size-[52rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#d8ff32]/15" />
         <motion.div aria-hidden="true" animate={prefersReducedMotion ? undefined : { rotate: 360 }} transition={{ duration: 34, repeat: Infinity, ease: "linear" }} className="absolute left-1/2 top-1/2 size-[38rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-[#d8ff32]/25" />
         <div className="relative z-10 max-w-5xl">
