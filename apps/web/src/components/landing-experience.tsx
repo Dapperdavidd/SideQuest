@@ -18,6 +18,7 @@ import {
 import {
   AnimatePresence,
   motion,
+  useInView,
   useReducedMotion,
   useScroll,
   useTransform,
@@ -75,7 +76,11 @@ const swipeQuests = [
 export function LandingExperience() {
   const heroRef = useRef<HTMLElement>(null);
   const dispatchRef = useRef<HTMLElement>(null);
+  const modesRef = useRef<HTMLElement>(null);
   const prefersReducedMotion = useReducedMotion();
+  const heroIsVisible = useInView(heroRef, { amount: 0.12 });
+  const dispatchIsVisible = useInView(dispatchRef, { amount: 0.12 });
+  const modesAreVisible = useInView(modesRef, { amount: 0.12 });
   const [swipeIndex, setSwipeIndex] = useState(0);
   const [swipeDirection, setSwipeDirection] = useState<1 | -1>(1);
   const [activeMode, setActiveMode] = useState(0);
@@ -90,7 +95,7 @@ export function LandingExperience() {
   const heroY = useTransform(heroProgress, [0, 1], [0, 180]);
   const heroScale = useTransform(heroProgress, [0, 1], [1.04, 1.18]);
   const heroOpacity = useTransform(heroProgress, [0, 0.82], [1, 0]);
-  const deckY = useTransform(dispatchProgress, [0.08, 0.45, 0.85], [120, 0, -80]);
+  const deckY = useTransform(dispatchProgress, [0.08, 0.45, 0.85], [60, 0, -30]);
 
   const advanceSwipe = (direction: 1 | -1) => {
     setSwipeDirection(direction);
@@ -98,19 +103,21 @@ export function LandingExperience() {
   };
 
   useEffect(() => {
-    if (prefersReducedMotion) return;
+    if (prefersReducedMotion || !dispatchIsVisible) return;
     const swipeTimer = window.setInterval(() => {
       setSwipeDirection((current) => (current === 1 ? -1 : 1));
       setSwipeIndex((current) => (current + 1) % swipeQuests.length);
     }, 2200);
+    return () => window.clearInterval(swipeTimer);
+  }, [dispatchIsVisible, prefersReducedMotion]);
+
+  useEffect(() => {
+    if (prefersReducedMotion || !modesAreVisible) return;
     const modeTimer = window.setInterval(() => {
       setActiveMode((current) => (current + 1) % questModes.length);
     }, 1400);
-    return () => {
-      window.clearInterval(swipeTimer);
-      window.clearInterval(modeTimer);
-    };
-  }, [prefersReducedMotion]);
+    return () => window.clearInterval(modeTimer);
+  }, [modesAreVisible, prefersReducedMotion]);
 
   return (
     <main className="overflow-clip bg-[#0b0c0a] text-[#f6f3e9]">
@@ -183,7 +190,7 @@ export function LandingExperience() {
               key={notification.title}
               className={`absolute ${position}`}
               initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.88, x: index % 2 === 0 ? 50 : -50 }}
-              animate={prefersReducedMotion && index === 0 ? { opacity: 1 } : prefersReducedMotion ? { opacity: 0 } : { opacity: [0, 1, 1, 0], scale: [0.88, 1, 1, 0.96], x: [index % 2 === 0 ? 50 : -50, 0, 0, index % 2 === 0 ? -18 : 18], y: [10, 0, 0, -12] }}
+              animate={prefersReducedMotion && index === 0 ? { opacity: 1 } : prefersReducedMotion || !heroIsVisible ? { opacity: 0 } : { opacity: [0, 1, 1, 0], scale: [0.88, 1, 1, 0.96], x: [index % 2 === 0 ? 50 : -50, 0, 0, index % 2 === 0 ? -18 : 18], y: [10, 0, 0, -12] }}
               transition={{ duration: 2.1, delay, repeat: prefersReducedMotion ? 0 : Infinity, repeatDelay: 6.7, times: [0, 0.15, 0.78, 1], ease: "easeOut" }}
             >
               <QuestNotificationBanner {...notification} />
@@ -196,7 +203,7 @@ export function LandingExperience() {
             <motion.div
               key={label}
               className="absolute right-0 flex items-center gap-2 rounded-full border border-white/20 bg-black/60 px-3 py-2 shadow-xl backdrop-blur"
-              animate={prefersReducedMotion ? undefined : { x: ["12vw", "-112vw"], y: [0, -5, 3, -4, 0] }}
+              animate={prefersReducedMotion || !heroIsVisible ? undefined : { x: ["12vw", "-112vw"], y: [0, -5, 3, -4, 0] }}
               transition={{ duration, delay, repeat: Infinity, ease: "linear" }}
               style={{ color, top }}
             >
@@ -207,9 +214,9 @@ export function LandingExperience() {
         </div>
       </section>
 
-      <section id="dispatch" ref={dispatchRef} className="relative min-h-[165vh] bg-[#090a09] text-white">
-        <div className="sticky top-0 flex min-h-[100svh] items-center overflow-hidden px-5 py-24 sm:px-9 lg:px-14">
-          <div aria-hidden="true" className="absolute inset-0 scale-110 bg-[url('/images/sidequest-rooftop-hero.webp')] bg-cover bg-center opacity-30 blur-sm" />
+      <section id="dispatch" ref={dispatchRef} className="relative min-h-[105svh] bg-[#090a09] text-white">
+        <div className="flex min-h-[105svh] items-center overflow-hidden px-5 py-24 sm:px-9 lg:px-14">
+          <div aria-hidden="true" className="absolute inset-0 scale-105 bg-[url('/images/sidequest-rooftop-hero.webp')] bg-cover bg-center opacity-25" />
           <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_70%_45%,rgba(216,255,50,.13),transparent_30%),linear-gradient(90deg,rgba(8,9,8,.95),rgba(8,9,8,.72),rgba(8,9,8,.9))]" />
           <div aria-hidden="true" className="landing-noise absolute inset-0 opacity-20" />
           <div className="relative mx-auto grid w-full max-w-[1428px] items-center gap-14 lg:grid-cols-[0.78fr_1.22fr]">
@@ -226,9 +233,9 @@ export function LandingExperience() {
             </div>
 
             <motion.div className="relative mx-auto h-[34rem] w-full max-w-[43rem]" style={prefersReducedMotion ? undefined : { y: deckY }}>
-              <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[-5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.04] backdrop-blur-xl" />
-              <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.04] backdrop-blur-xl" />
-              <div className="absolute inset-0 rounded-[2.6rem] border border-white/15 bg-white/[0.055] p-3 shadow-[0_40px_120px_rgba(0,0,0,.55)] backdrop-blur-3xl sm:p-5">
+              <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[-5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.055]" />
+              <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.055]" />
+              <div className="absolute inset-0 rounded-[2.6rem] border border-white/15 bg-white/[0.07] p-3 shadow-[0_32px_90px_rgba(0,0,0,.48)] backdrop-blur-lg sm:p-5">
                 <div className="flex items-center justify-between px-3 py-2 text-[0.56rem] font-black uppercase tracking-[0.22em] text-white/45"><span>Decline ←</span><span>Quest {swipeIndex + 1} / {swipeQuests.length}</span><span>→ Accept</span></div>
                 <div className="relative mt-2 h-[27rem] overflow-hidden rounded-[2rem]">
                   <AnimatePresence mode="popLayout" custom={swipeDirection}>
@@ -244,7 +251,7 @@ export function LandingExperience() {
                       onDragEnd={(_, info) => {
                         if (Math.abs(info.offset.x) > 80) advanceSwipe(info.offset.x > 0 ? 1 : -1);
                       }}
-                      className={`${swipeQuests[swipeIndex].className} absolute inset-0 cursor-grab overflow-hidden rounded-[2rem] bg-cover bg-center active:cursor-grabbing`}
+                      className={`${swipeQuests[swipeIndex].className} absolute inset-0 cursor-grab touch-pan-y overflow-hidden rounded-[2rem] bg-cover bg-center will-change-transform active:cursor-grabbing`}
                     >
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,9,8,.08),rgba(8,9,8,.9))]" />
                       <div className="relative flex h-full flex-col justify-between p-6 sm:p-8">
@@ -264,7 +271,7 @@ export function LandingExperience() {
         </div>
       </section>
 
-      <section id="how-it-plays" className="relative bg-[#f1ede3] px-5 py-28 text-[#131411] sm:px-9 lg:px-14 lg:py-40">
+      <section id="how-it-plays" ref={modesRef} className="relative bg-[#f1ede3] px-5 py-28 text-[#131411] sm:px-9 lg:px-14 lg:py-40">
         <div className="mx-auto max-w-[1428px]">
           <div className="flex flex-col justify-between gap-8 border-b border-black/15 pb-10 lg:flex-row lg:items-end">
             <div><p className="text-[0.62rem] font-black uppercase tracking-[0.3em] text-black/45">Pick your mode</p><h2 className="mt-5 max-w-4xl font-display text-[clamp(3.8rem,7.5vw,8.2rem)] font-black uppercase leading-[0.78] tracking-[-0.08em]">Three ways<br />to play.</h2></div>
