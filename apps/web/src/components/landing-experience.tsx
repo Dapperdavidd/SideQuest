@@ -1,26 +1,28 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowDown,
   ArrowRight,
-  Bell,
+  Bike,
+  Camera,
+  Coffee,
   Compass,
   Footprints,
-  MapPin,
+  Map,
   Sparkles,
   Trophy,
   UsersRound,
   Zap,
 } from "lucide-react";
 import {
+  AnimatePresence,
   motion,
   useReducedMotion,
   useScroll,
-  useSpring,
   useTransform,
 } from "motion/react";
+import { QuestNotificationBanner } from "@/components/quest-notification-banner";
 
 const questModes = [
   {
@@ -49,12 +51,34 @@ const questModes = [
   },
 ] as const;
 
-const runnerColors = ["#d8ff32", "#ff7f50", "#f4f0e7"];
+const heroNotifications = [
+  { eyebrow: "New side quest", title: "Catch the last light.", detail: "Rooftop lookout · 0.8 km", icon: Zap, accent: "#d8ff32", position: "right-[4vw] top-[17vh]", delay: 0.5 },
+  { eyebrow: "Friends quest", title: "Amara challenged you.", detail: "Golden-hour portrait · 20 min", icon: Camera, accent: "#ff9868", position: "left-[3vw] top-[22vh]", delay: 2.7 },
+  { eyebrow: "Quest nearby", title: "Coffee crawl starts soon.", detail: "Three stops · 15 NIM", icon: Coffee, accent: "#f2d4a8", position: "right-[5vw] bottom-[21vh]", delay: 4.9 },
+  { eyebrow: "Squad update", title: "Two friends just joined.", detail: "Night ride · Meet at 9:00", icon: Bike, accent: "#9ae6ff", position: "left-[5vw] bottom-[20vh]", delay: 7.1 },
+] as const;
+
+const activityTokens = [
+  { icon: Camera, color: "#d8ff32", label: "Photo", top: 2, duration: 8.2, delay: 0.3 },
+  { icon: Bike, color: "#9ae6ff", label: "Ride", top: 30, duration: 10.4, delay: 1.7 },
+  { icon: Coffee, color: "#ff9868", label: "Coffee", top: 58, duration: 9.1, delay: 3.2 },
+  { icon: Map, color: "#f4f0e7", label: "Explore", top: 86, duration: 11.8, delay: 4.5 },
+  { icon: Footprints, color: "#d8ff32", label: "Walk", top: 114, duration: 9.8, delay: 6.1 },
+] as const;
+
+const swipeQuests = [
+  { title: "Golden hour, one frame", kicker: "Photo quest", detail: "Catch the last beam of sunlight before it slips behind the city.", reward: "12 NIM", distance: "0.8 km", className: "landing-card-explore" },
+  { title: "The café nobody knows", kicker: "Discovery quest", detail: "Follow three clues and order the drink waiting at the final stop.", reward: "15 NIM", distance: "1.4 km", className: "landing-card-bounty" },
+  { title: "A stranger picks the route", kicker: "Friends quest", detail: "Let the group vote. Take the winning path without checking the map.", reward: "8 NIM", distance: "2.1 km", className: "landing-card-friends" },
+] as const;
 
 export function LandingExperience() {
   const heroRef = useRef<HTMLElement>(null);
   const dispatchRef = useRef<HTMLElement>(null);
   const prefersReducedMotion = useReducedMotion();
+  const [swipeIndex, setSwipeIndex] = useState(0);
+  const [swipeDirection, setSwipeDirection] = useState<1 | -1>(1);
+  const [activeMode, setActiveMode] = useState(0);
   const { scrollYProgress: heroProgress } = useScroll({
     target: heroRef,
     offset: ["start start", "end start"],
@@ -66,11 +90,27 @@ export function LandingExperience() {
   const heroY = useTransform(heroProgress, [0, 1], [0, 180]);
   const heroScale = useTransform(heroProgress, [0, 1], [1.04, 1.18]);
   const heroOpacity = useTransform(heroProgress, [0, 0.82], [1, 0]);
-  const notificationX = useSpring(
-    useTransform(dispatchProgress, [0.1, 0.48, 0.82], [220, 0, -60]),
-    { stiffness: 90, damping: 24 },
-  );
-  const notificationRotate = useTransform(dispatchProgress, [0.1, 0.5], [8, -2]);
+  const deckY = useTransform(dispatchProgress, [0.08, 0.45, 0.85], [120, 0, -80]);
+
+  const advanceSwipe = (direction: 1 | -1) => {
+    setSwipeDirection(direction);
+    setSwipeIndex((current) => (current + 1) % swipeQuests.length);
+  };
+
+  useEffect(() => {
+    if (prefersReducedMotion) return;
+    const swipeTimer = window.setInterval(() => {
+      setSwipeDirection((current) => (current === 1 ? -1 : 1));
+      setSwipeIndex((current) => (current + 1) % swipeQuests.length);
+    }, 2200);
+    const modeTimer = window.setInterval(() => {
+      setActiveMode((current) => (current + 1) % questModes.length);
+    }, 1400);
+    return () => {
+      window.clearInterval(swipeTimer);
+      window.clearInterval(modeTimer);
+    };
+  }, [prefersReducedMotion]);
 
   return (
     <main className="overflow-clip bg-[#0b0c0a] text-[#f6f3e9]">
@@ -117,78 +157,107 @@ export function LandingExperience() {
               </h1>
             </div>
 
-            <motion.a
-              href="#dispatch"
+            <motion.div
               initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.7 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.65, delay: 0.75, type: "spring" }}
-              className="group relative mb-4 hidden size-32 shrink-0 place-items-center rounded-full bg-[#d8ff32] text-black transition hover:scale-105 lg:grid"
+              className="mb-4 hidden lg:block"
             >
-              <span className="text-center text-xs font-black uppercase tracking-[0.2em]">Enter</span>
-              <ArrowDown className="absolute mt-9 transition-transform group-hover:translate-y-2" size={18} />
-            </motion.a>
+              <Link href="/discover" className="group relative grid size-32 shrink-0 place-items-center rounded-full bg-[#d8ff32] text-black transition hover:scale-105">
+                <span className="text-center text-xs font-black uppercase tracking-[0.2em]">Enter</span>
+                <ArrowRight className="absolute mt-9 transition-transform group-hover:translate-x-2" size={18} />
+              </Link>
+            </motion.div>
           </div>
 
           <div className="mx-auto mt-8 flex w-full max-w-[1428px] items-end justify-between gap-6 border-t border-white/20 pt-5">
             <p className="max-w-sm text-sm leading-6 text-white/66 sm:text-base">Turn the plans you nearly skipped into the stories you keep telling.</p>
-            <a href="#dispatch" className="flex items-center gap-3 rounded-full bg-[#d8ff32] px-6 py-3.5 text-xs font-black uppercase tracking-[0.18em] text-black lg:hidden">Enter <ArrowDown size={15} /></a>
-            <div className="hidden items-center gap-3 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/50 sm:flex"><span>Scroll to play</span><ArrowDown size={14} className="landing-bounce" /></div>
+            <Link href="/discover" className="flex items-center gap-3 rounded-full bg-[#d8ff32] px-6 py-3.5 text-xs font-black uppercase tracking-[0.18em] text-black lg:hidden">Enter <ArrowRight size={15} /></Link>
+            <div className="hidden items-center gap-3 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/50 sm:flex"><span>Scroll to play</span><ArrowRight size={14} className="rotate-90 landing-bounce" /></div>
           </div>
         </motion.div>
 
-        <motion.div
-          aria-hidden="true"
-          initial={prefersReducedMotion ? false : { opacity: 0, x: 60, rotate: 5 }}
-          animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0, 1, 1, 0], x: [60, 0, 0, -20], y: [10, 0, 0, -18], rotate: [5, 0, 0, -2] }}
-          transition={{ duration: 5.4, delay: 1.35, repeat: prefersReducedMotion ? 0 : Infinity, repeatDelay: 2.4, times: [0, 0.13, 0.78, 1] }}
-          className="absolute right-[6vw] top-[18vh] z-20 hidden w-[21rem] rounded-[1.4rem] border border-white/20 bg-black/55 p-4 shadow-2xl backdrop-blur-2xl md:block"
-        >
-          <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-full bg-[#d8ff32] text-black"><Zap size={19} fill="currentColor" /></span>
-            <div className="min-w-0 flex-1"><p className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[#d8ff32]">New side quest</p><p className="mt-1 text-sm font-semibold text-white">Catch the last light.</p></div>
-            <span className="text-[0.62rem] text-white/45">now</span>
-          </div>
-          <div className="mt-4 flex items-center gap-2 border-t border-white/10 pt-3 text-[0.7rem] text-white/60"><MapPin size={13} /> Rooftop lookout · 0.8 km</div>
-        </motion.div>
-
-        <div aria-hidden="true" className="absolute bottom-[17%] left-0 z-20 h-14 w-full overflow-hidden opacity-80">
-          {runnerColors.map((color, index) => (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 hidden md:block">
+          {heroNotifications.map(({ position, delay, ...notification }, index) => (
             <motion.div
-              key={color}
-              className="absolute left-0 top-3 grid size-9 place-items-center rounded-full border border-white/20 bg-black/60 shadow-xl backdrop-blur"
-              animate={prefersReducedMotion ? undefined : { x: ["-10vw", "110vw"], y: [4, -8, 2, -5, 4] }}
-              transition={{ duration: 8.2 + index * 1.4, delay: 2.1 + index * 1.2, repeat: Infinity, ease: "linear" }}
-              style={{ color }}
+              key={notification.title}
+              className={`absolute ${position}`}
+              initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.88, x: index % 2 === 0 ? 50 : -50 }}
+              animate={prefersReducedMotion && index === 0 ? { opacity: 1 } : prefersReducedMotion ? { opacity: 0 } : { opacity: [0, 1, 1, 0], scale: [0.88, 1, 1, 0.96], x: [index % 2 === 0 ? 50 : -50, 0, 0, index % 2 === 0 ? -18 : 18], y: [10, 0, 0, -12] }}
+              transition={{ duration: 2.1, delay, repeat: prefersReducedMotion ? 0 : Infinity, repeatDelay: 6.7, times: [0, 0.15, 0.78, 1], ease: "easeOut" }}
             >
-              <Footprints size={15} />
+              <QuestNotificationBanner {...notification} />
+            </motion.div>
+          ))}
+        </div>
+
+        <div aria-hidden="true" className="absolute bottom-[18%] left-0 z-[5] hidden h-40 w-full overflow-hidden opacity-85 sm:block">
+          {activityTokens.map(({ icon: Icon, color, label, top, duration, delay }) => (
+            <motion.div
+              key={label}
+              className="absolute right-0 flex items-center gap-2 rounded-full border border-white/20 bg-black/60 px-3 py-2 shadow-xl backdrop-blur"
+              animate={prefersReducedMotion ? undefined : { x: ["12vw", "-112vw"], y: [0, -5, 3, -4, 0] }}
+              transition={{ duration, delay, repeat: Infinity, ease: "linear" }}
+              style={{ color, top }}
+            >
+              <Icon size={15} />
+              <span className="text-[0.52rem] font-black uppercase tracking-[0.18em]">{label}</span>
             </motion.div>
           ))}
         </div>
       </section>
 
-      <section id="dispatch" ref={dispatchRef} className="relative min-h-[165vh] bg-[#d8ff32] text-[#10110e]">
+      <section id="dispatch" ref={dispatchRef} className="relative min-h-[165vh] bg-[#090a09] text-white">
         <div className="sticky top-0 flex min-h-[100svh] items-center overflow-hidden px-5 py-24 sm:px-9 lg:px-14">
-          <div aria-hidden="true" className="landing-grid absolute inset-0 opacity-35" />
-          <div className="relative mx-auto grid w-full max-w-[1428px] items-center gap-16 lg:grid-cols-[0.86fr_1.14fr]">
+          <div aria-hidden="true" className="absolute inset-0 scale-110 bg-[url('/images/sidequest-rooftop-hero.webp')] bg-cover bg-center opacity-30 blur-sm" />
+          <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_70%_45%,rgba(216,255,50,.13),transparent_30%),linear-gradient(90deg,rgba(8,9,8,.95),rgba(8,9,8,.72),rgba(8,9,8,.9))]" />
+          <div aria-hidden="true" className="landing-noise absolute inset-0 opacity-20" />
+          <div className="relative mx-auto grid w-full max-w-[1428px] items-center gap-14 lg:grid-cols-[0.78fr_1.22fr]">
             <div>
-              <motion.p initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.5 }} className="text-[0.65rem] font-black uppercase tracking-[0.32em]">Quest dispatch / 8:41 PM</motion.p>
+              <motion.p initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.5 }} className="text-[0.65rem] font-black uppercase tracking-[0.32em] text-[#d8ff32]">Quest radar / live</motion.p>
               <motion.h2 initial={{ opacity: 0, y: 45 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.4 }} transition={{ duration: 0.7 }} className="mt-7 max-w-[42rem] font-display text-[clamp(4rem,7vw,7.7rem)] font-black uppercase leading-[0.82] tracking-[-0.075em]">
-                A quiet day.<br />Then—<span className="italic">ping.</span>
+                Your move.<br /><span className="text-[#d8ff32]">Pick a side.</span>
               </motion.h2>
-              <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 0.25 }} className="mt-8 max-w-md text-base font-medium leading-7 text-black/65">A SideQuest arrives at exactly the wrong time. Which is usually the right time to say yes.</motion.p>
+              <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 0.25 }} className="mt-8 max-w-md text-base leading-7 text-white/60">Every ping is a choice. Swipe left to decline. Swipe right to accept the quest and step into the story.</motion.p>
+              <div className="mt-8 flex gap-3">
+                <button type="button" onClick={() => advanceSwipe(-1)} className="rounded-full border border-white/20 bg-white/5 px-5 py-3 text-[0.62rem] font-black uppercase tracking-[0.18em] text-white/65 backdrop-blur-xl transition hover:bg-white/15" aria-label="Decline quest">← Decline</button>
+                <button type="button" onClick={() => advanceSwipe(1)} className="rounded-full bg-[#d8ff32] px-5 py-3 text-[0.62rem] font-black uppercase tracking-[0.18em] text-black transition hover:scale-105" aria-label="Accept quest">Accept →</button>
+              </div>
             </div>
 
-            <motion.div className="relative mx-auto w-full max-w-[41rem]" style={prefersReducedMotion ? undefined : { x: notificationX, rotate: notificationRotate }}>
-              <div aria-hidden="true" className="absolute -inset-12 rounded-full border border-black/10" />
-              <div aria-hidden="true" className="absolute -inset-24 rounded-full border border-black/[0.06]" />
-              <div className="relative overflow-hidden rounded-[2rem] border-2 border-black bg-[#11120f] p-5 text-white shadow-[18px_22px_0_#11120f] sm:p-7">
-                <div className="flex items-center justify-between border-b border-white/15 pb-5"><span className="font-display text-xl font-black tracking-[-0.06em]">sidequest<span className="text-[#d8ff32]">.</span></span><span className="text-[0.6rem] uppercase tracking-[0.22em] text-white/45">just now</span></div>
-                <div className="flex gap-4 py-7 sm:gap-6">
-                  <motion.span animate={prefersReducedMotion ? undefined : { scale: [1, 1.14, 1] }} transition={{ duration: 1.3, repeat: Infinity }} className="grid size-16 shrink-0 place-items-center rounded-2xl bg-[#d8ff32] text-black sm:size-20"><Bell size={30} /></motion.span>
-                  <div><p className="text-[0.62rem] font-black uppercase tracking-[0.22em] text-[#d8ff32]">New quest nearby</p><h3 className="mt-2 font-display text-2xl font-bold leading-tight sm:text-4xl">The city looks different after midnight.</h3><p className="mt-3 text-sm leading-6 text-white/55">Find the three glowing checkpoints before the clock runs out.</p></div>
+            <motion.div className="relative mx-auto h-[34rem] w-full max-w-[43rem]" style={prefersReducedMotion ? undefined : { y: deckY }}>
+              <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[-5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.04] backdrop-blur-xl" />
+              <div aria-hidden="true" className="absolute inset-x-[9%] top-[8%] h-[82%] rotate-[5deg] rounded-[2.3rem] border border-white/10 bg-white/[0.04] backdrop-blur-xl" />
+              <div className="absolute inset-0 rounded-[2.6rem] border border-white/15 bg-white/[0.055] p-3 shadow-[0_40px_120px_rgba(0,0,0,.55)] backdrop-blur-3xl sm:p-5">
+                <div className="flex items-center justify-between px-3 py-2 text-[0.56rem] font-black uppercase tracking-[0.22em] text-white/45"><span>Decline ←</span><span>Quest {swipeIndex + 1} / {swipeQuests.length}</span><span>→ Accept</span></div>
+                <div className="relative mt-2 h-[27rem] overflow-hidden rounded-[2rem]">
+                  <AnimatePresence mode="popLayout" custom={swipeDirection}>
+                    <motion.article
+                      key={swipeQuests[swipeIndex].title}
+                      initial={{ opacity: 0, scale: 0.92, x: swipeDirection * -80, rotate: swipeDirection * -4 }}
+                      animate={{ opacity: 1, scale: 1, x: 0, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.94, x: swipeDirection * 520, rotate: swipeDirection * 13 }}
+                      transition={{ duration: 0.48, ease: [0.16, 1, 0.3, 1] }}
+                      drag={prefersReducedMotion ? false : "x"}
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0.72}
+                      onDragEnd={(_, info) => {
+                        if (Math.abs(info.offset.x) > 80) advanceSwipe(info.offset.x > 0 ? 1 : -1);
+                      }}
+                      className={`${swipeQuests[swipeIndex].className} absolute inset-0 cursor-grab overflow-hidden rounded-[2rem] bg-cover bg-center active:cursor-grabbing`}
+                    >
+                      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,9,8,.08),rgba(8,9,8,.9))]" />
+                      <div className="relative flex h-full flex-col justify-between p-6 sm:p-8">
+                        <div className="flex items-center justify-between"><span className="rounded-full border border-white/25 bg-black/20 px-3 py-2 text-[0.56rem] font-black uppercase tracking-[0.2em] backdrop-blur-xl">{swipeQuests[swipeIndex].kicker}</span><span className="grid size-11 place-items-center rounded-full bg-[#d8ff32] text-black"><Zap size={18} /></span></div>
+                        <div>
+                          <h3 className="max-w-lg font-display text-4xl font-black uppercase leading-[0.88] tracking-[-0.06em] sm:text-6xl">{swipeQuests[swipeIndex].title}</h3>
+                          <p className="mt-4 max-w-md text-sm leading-6 text-white/65">{swipeQuests[swipeIndex].detail}</p>
+                          <div className="mt-6 flex gap-2"><span className="rounded-full bg-white/10 px-4 py-2 text-xs font-bold backdrop-blur-xl">{swipeQuests[swipeIndex].distance}</span><span className="rounded-full bg-[#d8ff32] px-4 py-2 text-xs font-black text-black">{swipeQuests[swipeIndex].reward}</span></div>
+                        </div>
+                      </div>
+                    </motion.article>
+                  </AnimatePresence>
                 </div>
-                <div className="grid grid-cols-3 gap-2 border-t border-white/15 pt-5 text-center"><div><b className="block text-lg">2.4 km</b><span className="text-[0.55rem] uppercase tracking-widest text-white/40">distance</span></div><div><b className="block text-lg">45 min</b><span className="text-[0.55rem] uppercase tracking-widest text-white/40">time left</span></div><div><b className="block text-lg">10 NIM</b><span className="text-[0.55rem] uppercase tracking-widest text-white/40">reward</span></div></div>
-                <Link href="/coming-soon" className="group mt-6 flex w-full items-center justify-between rounded-full bg-[#d8ff32] px-6 py-4 text-sm font-black uppercase tracking-[0.15em] text-black"><span>Accept quest</span><ArrowRight size={18} className="transition-transform group-hover:translate-x-2" /></Link>
               </div>
             </motion.div>
           </div>
@@ -202,7 +271,7 @@ export function LandingExperience() {
             <p className="max-w-sm text-sm leading-6 text-black/55 sm:text-base">No streaks to protect. No endless feed. Just a reason to get up, go out and do something worth remembering.</p>
           </div>
 
-          <div className="mt-10 grid gap-4 lg:grid-cols-3">
+          <div className="mt-10 hidden gap-4 lg:grid lg:grid-cols-3">
             {questModes.map(({ number, title, label, description, icon: Icon, className }, index) => (
               <motion.article
                 key={label}
@@ -219,6 +288,38 @@ export function LandingExperience() {
                 </div>
               </motion.article>
             ))}
+          </div>
+
+          <div className="relative mt-10 h-[35rem] lg:hidden">
+            <div aria-hidden="true" className="absolute inset-x-5 top-4 h-[31rem] rotate-[-3deg] rounded-[1.7rem] bg-black/10" />
+            <div aria-hidden="true" className="absolute inset-x-5 top-4 h-[31rem] rotate-[3deg] rounded-[1.7rem] bg-black/10" />
+            <AnimatePresence mode="popLayout">
+              {(() => {
+                const mode = questModes[activeMode];
+                const Icon = mode.icon;
+                return (
+                  <motion.article
+                    key={mode.label}
+                    initial={prefersReducedMotion ? false : { opacity: 0, x: 70, scale: 0.94, rotate: 3 }}
+                    animate={{ opacity: 1, x: 0, scale: 1, rotate: 0 }}
+                    exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: -70, scale: 0.94, rotate: -3 }}
+                    transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                    className={`${mode.className} absolute inset-x-0 top-0 flex h-[32rem] overflow-hidden rounded-[1.7rem] border border-black/15 bg-cover bg-center p-6 text-white`}
+                  >
+                    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,11,9,.05),rgba(10,11,9,.84))]" />
+                    <div className="relative flex w-full flex-col">
+                      <div className="flex items-center justify-between"><span className="text-[0.62rem] font-black uppercase tracking-[0.25em]">Mode {mode.number}</span><span className="grid size-11 place-items-center rounded-full border border-white/30 bg-black/10 backdrop-blur"><Icon size={18} /></span></div>
+                      <div className="mt-auto"><span className="inline-flex rounded-full bg-[#d8ff32] px-3 py-1 text-[0.58rem] font-black uppercase tracking-[0.2em] text-black">{mode.label}</span><h3 className="mt-4 font-display text-4xl font-black uppercase leading-[0.9] tracking-[-0.055em]">{mode.title}</h3><p className="mt-4 max-w-xs text-sm leading-6 text-white/65">{mode.description}</p></div>
+                    </div>
+                  </motion.article>
+                );
+              })()}
+            </AnimatePresence>
+            <div className="absolute bottom-0 left-1/2 flex -translate-x-1/2 gap-2" aria-label="Quest mode carousel">
+              {questModes.map((mode, index) => (
+                <button key={mode.label} type="button" onClick={() => setActiveMode(index)} aria-label={`Show ${mode.label} mode`} className={`h-2 rounded-full transition-all ${activeMode === index ? "w-8 bg-black" : "w-2 bg-black/25"}`} />
+              ))}
+            </div>
           </div>
         </div>
       </section>
