@@ -57,7 +57,7 @@ const questModes = [
 const heroNotifications = [
   { eyebrow: "New side quest", title: "Catch the last light.", detail: "Rooftop lookout · 0.8 km", icon: Zap, accent: "#d8ff32", position: "right-[4vw] top-[17vh]", delay: 0.5 },
   { eyebrow: "Friends quest", title: "Amara challenged you.", detail: "Golden-hour portrait · 20 min", icon: Camera, accent: "#ff9868", position: "left-[3vw] top-[22vh]", delay: 2.7 },
-  { eyebrow: "Quest nearby", title: "Coffee crawl starts soon.", detail: "Three stops · 15 NIM", icon: Coffee, accent: "#f2d4a8", position: "right-[5vw] bottom-[21vh]", delay: 4.9 },
+  { eyebrow: "Quest nearby", title: "Coffee crawl starts soon.", detail: "Three stops · 15 NIM", icon: Coffee, accent: "#f2d4a8", position: "right-[25vw] bottom-[16vh]", delay: 4.9 },
   { eyebrow: "Squad update", title: "Two friends just joined.", detail: "Night ride · Meet at 9:00", icon: Bike, accent: "#9ae6ff", position: "left-[5vw] bottom-[20vh]", delay: 7.1 },
 ] as const;
 
