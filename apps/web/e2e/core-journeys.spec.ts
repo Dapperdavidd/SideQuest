@@ -1,12 +1,20 @@
 import { expect, test } from "@playwright/test";
 
-test("landing page presents SideQuest as a limited-entry social challenge app", async ({ page }) => {
+test("cinematic landing page introduces the SideQuest experience", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: /life comes with side quests/i })).toBeVisible();
-  await expect(page.getByText("10 max")).toBeVisible();
-  await expect(page.getByText("3 max")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Find a quest" })).toHaveAttribute("href", "/discover");
+  await expect(page.getByRole("link", { name: "Enter" })).toHaveAttribute("href", "#dispatch");
+  await expect(page.getByRole("link", { name: "Open app" }).first()).toHaveAttribute("href", "/coming-soon");
+  await expect(page.getByRole("heading", { name: /three ways to play/i })).toBeVisible();
+});
+
+test("public app launch action opens the coming-soon experience", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("link", { name: "Open app" }).first().click();
+  await expect(page).toHaveURL(/\/coming-soon$/);
+  await expect(page.getByRole("heading", { name: "Coming soon." })).toBeVisible();
 });
 
 test("email authentication is available without hiding guest discovery", async ({ page }) => {
@@ -14,6 +22,7 @@ test("email authentication is available without hiding guest discovery", async (
   await page.waitForLoadState("networkidle");
 
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Apple/i })).toHaveCount(0);
   await page.getByRole("button", { name: "Continue with email" }).click();
   await expect(page.getByLabel("Email address")).toBeVisible();
   await expect(page.getByRole("link", { name: "Browse quests as a guest" })).toHaveAttribute("href", "/discover");
