@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, CalendarDays, CheckCircle2, MapPin, Trophy, UsersRound } from "lucide-react";
-import { Logo } from "@/components/logo";
+import { CalendarDays, CheckCircle2, MapPin, Trophy, UsersRound } from "lucide-react";
+import { AppShell } from "@/components/app-shell";
 import { formatDeadline, formatReward, getQuest, getQuestCheckpoints, getQuestSaved, getQuestWinners, questImageClass } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
@@ -42,13 +42,8 @@ async function QuestExperience({ params }: QuestPageProps) {
   const isOpen = quest.status === "OPEN";
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="flex items-center justify-between border-b border-line bg-white px-5 py-4 sm:px-8">
-        <Logo />
-        <Link href="/discover" className="flex items-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-bold"><ArrowLeft size={16} /> Discover</Link>
-      </header>
-
-      <div className="mx-auto grid max-w-6xl gap-7 px-5 py-7 lg:grid-cols-[minmax(0,1fr)_350px] lg:px-8 lg:py-10">
+    <AppShell active="discover" viewer={viewer ? { displayName: viewer.displayName, avatarUrl: viewer.avatarUrl } : null}>
+      <div className="mx-auto grid max-w-6xl gap-7 px-5 py-7 lg:grid-cols-[minmax(0,1fr)_350px] lg:px-8 lg:py-9">
         <article>
           <div className={`${questImageClass(quest.quest_type)} min-h-[320px] rounded-[1.5rem] bg-cover bg-center p-6 text-white sm:min-h-[420px] sm:p-9`} style={quest.cover_media_url ? { backgroundImage: `linear-gradient(rgba(23,25,23,.08),rgba(23,25,23,.82)),url(${JSON.stringify(quest.cover_media_url)})` } : undefined}>
             <div className="flex min-h-[272px] max-w-2xl flex-col justify-end sm:min-h-[348px]">
@@ -87,6 +82,6 @@ async function QuestExperience({ params }: QuestPageProps) {
           </div>
         </aside>
       </div>
-    </main>
+    </AppShell>
   );
 }
