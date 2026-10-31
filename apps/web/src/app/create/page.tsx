@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, Plus, QrCode, Trash2, UsersRound, WalletCards, X } from "lucide-react";
-import { Logo } from "@/components/logo";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, ImagePlus, LoaderCircle, MapPin, Plus, QrCode, Trash2, UsersRound, WalletCards } from "lucide-react";
+import { AppShell } from "@/components/app-shell";
 import { apiUrl, getMyOrganization, getQuest, getQuestCheckpoints, readApiError, type Organization, type Quest } from "@/lib/api/quests";
 import { createClient } from "@/lib/supabase/client";
 import { FundingPanel } from "./funding-panel";
@@ -284,13 +284,9 @@ export default function CreateQuestPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="flex items-center justify-between border-b border-line bg-white px-5 py-4 sm:px-8">
-        <div><Logo /><p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-muted">{editingQuestId ? "Editing draft" : "Create a quest"}</p></div>
-        <Link href="/discover" aria-label="Close quest creator" className="grid h-10 w-10 place-items-center rounded-full border border-line"><X size={19} /></Link>
-      </header>
-
-      <div className="mx-auto grid max-w-6xl gap-8 px-5 py-7 lg:grid-cols-[minmax(0,1fr)_330px] lg:px-8 lg:py-10">
+    <AppShell active="create" viewer={{ displayName: "You" }}>
+      <div className="mx-auto max-w-6xl px-5 pt-7 lg:px-8 lg:pt-9"><p className="app-eyebrow">{editingQuestId ? "Editing your draft" : "Make something happen"}</p><h1 className="mt-2 font-display text-4xl font-extrabold tracking-[-0.05em]">Create a quest</h1><p className="mt-2 text-sm text-muted">We’ll guide you through it—one simple decision at a time.</p></div>
+      <div className="mx-auto grid max-w-6xl gap-8 px-5 py-7 lg:grid-cols-[minmax(0,1fr)_330px] lg:px-8 lg:py-8">
         <section aria-busy={loadingDraft}>
           {loadingDraft ? <div className="mb-5 flex items-center gap-2 rounded-xl bg-white p-4 text-sm font-semibold text-muted"><LoaderCircle size={17} className="animate-spin" />Loading saved draft…</div> : null}
           {draftLoadError ? <div role="alert" className="mb-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]"><strong>Draft unavailable.</strong><br />{draftLoadError} <Link href="/quests" className="font-bold underline">Return to My quests</Link></div> : null}
@@ -368,6 +364,6 @@ export default function CreateQuestPage() {
           </div>
         </aside>
       </div>
-    </main>
+    </AppShell>
   );
 }

@@ -2,8 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, Award, Compass, LogOut, Sparkles, Trophy, WalletCards } from "lucide-react";
-import { Logo } from "@/components/logo";
+import { Award, Compass, LogOut, Sparkles, Trophy, WalletCards } from "lucide-react";
+import { AppShell } from "@/components/app-shell";
 import { AchievementGrid } from "@/components/achievement-grid";
 import { getAchievements, getCreatorAnalytics, getMyOrganization, getOrganizationAnalytics, getPublicProfile } from "@/lib/api/quests";
 import { getViewer } from "@/lib/auth/viewer";
@@ -39,15 +39,9 @@ async function ProfileContent() {
   const initial = firstName.charAt(0).toUpperCase();
 
   return (
-    <main className="min-h-screen bg-[#101310] p-3 text-white sm:p-5">
-      <div className="mx-auto min-h-[calc(100vh-2.5rem)] max-w-5xl overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#151815]">
-        <header className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-8">
-          <Link href="/discover" className="flex items-center gap-2 text-sm text-white/65 hover:text-white"><ArrowLeft size={18} />Discover</Link>
-          <Logo inverse />
-          <form action={signOut}>
-            <button className="flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-sm text-white/65 hover:bg-white/5 hover:text-white"><LogOut size={16} />Sign out</button>
-          </form>
-        </header>
+    <AppShell active="profile" viewer={{ displayName: viewer.displayName, avatarUrl: viewer.avatarUrl }}>
+      <div className="px-4 py-7 sm:px-7 lg:px-9 lg:py-9"><div className="mx-auto max-w-5xl overflow-hidden rounded-[1.7rem] bg-[#151815] text-white shadow-[0_25px_70px_rgba(17,19,16,.16)]">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-8"><div><p className="app-eyebrow !text-accent">Your SideQuest story</p></div><form action={signOut}><button className="flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-sm text-white/65 hover:bg-white/5 hover:text-white"><LogOut size={16} />Sign out</button></form></div>
 
         <section className="relative overflow-hidden border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(199,255,0,0.16),transparent_35%)] px-5 py-12 sm:px-10 sm:py-16">
           <div className="flex flex-col gap-7 sm:flex-row sm:items-center">
@@ -106,8 +100,8 @@ async function ProfileContent() {
             <Link href="/wallet" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline"><WalletCards size={16} />View reward payouts</Link>
           </div>
         </section>
-      </div>
-    </main>
+      </div></div>
+    </AppShell>
   );
 }
 

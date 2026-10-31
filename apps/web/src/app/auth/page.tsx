@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { LoaderCircle, Mail } from "lucide-react";
+import { ArrowLeft, Check, LoaderCircle, Mail, Sparkles } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
@@ -45,11 +45,12 @@ export default function AuthPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-5 py-10">
-      <section className="w-full max-w-md rounded-[1.75rem] border border-line bg-surface p-7 text-center shadow-[0_24px_80px_rgba(23,25,23,0.09)] sm:p-10">
-        <Logo />
-        <h1 className="mt-10 font-display text-3xl font-bold tracking-tight">Welcome to SideQuest</h1>
-        <p className="mx-auto mt-3 max-w-xs text-sm leading-6 text-muted">Create your account to join quests, submit entries, and make everyday life more interesting.</p>
+    <main className="grid min-h-screen bg-dark lg:grid-cols-[1.05fr_.95fr]">
+      <section className="relative hidden overflow-hidden p-12 text-white lg:flex lg:flex-col"><div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(199,255,0,.25),transparent_25%),radial-gradient(circle_at_85%_80%,rgba(119,92,255,.22),transparent_28%)]" /><div className="relative"><Logo inverse /></div><div className="relative my-auto max-w-xl"><span className="flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-accent"><Sparkles size={14} />Your next story starts here</span><h1 className="mt-6 font-display text-6xl font-extrabold leading-[.95] tracking-[-0.065em]">Ordinary day.<br />Unexpected quest.</h1><p className="mt-5 max-w-md text-base leading-7 text-white/55">Join people around you doing small, memorable things—then bring your own ideas to life.</p><ul className="mt-8 space-y-3 text-sm font-semibold text-white/75">{["Find something fun in seconds", "Join friends or meet your community", "Share the moment when you’re done"].map((item) => <li key={item} className="flex items-center gap-3"><span className="grid h-6 w-6 place-items-center rounded-full bg-accent text-dark"><Check size={14} /></span>{item}</li>)}</ul></div></section>
+      <section className="grid place-items-center bg-[#f4f1e8] px-5 py-10"><div className="w-full max-w-md rounded-[1.75rem] border border-black/8 bg-white p-7 text-center shadow-[0_24px_80px_rgba(23,25,23,0.09)] sm:p-10">
+        <div className="lg:hidden"><Logo /></div>
+        <p className="app-eyebrow mt-8 lg:mt-0">One tap from adventure</p><h1 className="mt-3 font-display text-3xl font-extrabold tracking-[-0.045em]">Welcome to SideQuest</h1>
+        <p className="mx-auto mt-3 max-w-xs text-sm leading-6 text-muted">Sign in when you’re ready to join, create, or save a quest.</p>
         <div className="mt-8 space-y-3">
           <button disabled={loading} onClick={signInWithGoogle} className="flex w-full items-center justify-center gap-3 rounded-full border border-line px-5 py-3.5 font-semibold transition hover:bg-background disabled:opacity-50"><span className="text-lg font-bold text-[#4285F4]">G</span>Continue with Google</button>
           <button disabled={loading} onClick={() => setEmailOpen((value) => !value)} className="flex w-full items-center justify-center gap-3 rounded-full border border-line px-5 py-3.5 font-semibold transition hover:bg-background disabled:opacity-50"><Mail size={19} />Continue with email</button>
@@ -63,8 +64,8 @@ export default function AuthPage() {
         ) : null}
         {message ? <p role="status" className="mt-4 rounded-xl bg-accent-soft px-4 py-3 text-left text-xs leading-5 text-dark">{message}</p> : null}
         <p className="mt-7 text-xs leading-5 text-muted">By continuing, you agree to the terms and privacy policy.</p>
-        <Link href="/discover" className="mt-5 inline-block text-sm font-bold underline decoration-accent decoration-2 underline-offset-4">Browse quests as a guest</Link>
-      </section>
+        <Link href="/discover" className="mt-5 inline-flex items-center gap-2 text-sm font-bold underline decoration-accent decoration-2 underline-offset-4"><ArrowLeft size={15} />Browse quests as a guest</Link>
+      </div></section>
     </main>
   );
 }

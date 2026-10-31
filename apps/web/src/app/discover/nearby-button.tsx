@@ -49,11 +49,11 @@ export function NearbyButton({ active, search }: NearbyButtonProps) {
 
   return (
     <div>
-      <button onClick={active ? clear : locate} disabled={locating} className={`flex items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50 ${active ? "bg-white text-dark" : "border border-white/10 text-white/60"}`}>
+      <button onClick={active ? clear : locate} disabled={locating} className={`flex items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50 ${active ? "bg-accent text-dark" : "border border-black/10 bg-white/55 text-muted hover:border-black/25 hover:text-dark"}`}>
         {locating ? <LoaderCircle size={16} className="animate-spin" /> : active ? <X size={16} /> : <LocateFixed size={16} />}
         {locating ? "Finding you…" : active ? "Nearby · 25 km" : "Nearby"}
       </button>
-      {error ? <p role="alert" className="mt-2 max-w-xs text-xs text-[#ffd0c8]">{error}</p> : null}
+      {error ? <p role="alert" className="mt-2 max-w-xs text-xs font-semibold text-[#a33d2c]">{error}</p> : null}
     </div>
   );
 }

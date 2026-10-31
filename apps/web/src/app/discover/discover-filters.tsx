@@ -46,13 +46,13 @@ export function DiscoverFilters({ activeType, search }: DiscoverFiltersProps) {
             type="button"
             aria-pressed={selected}
             onClick={() => selectFilter(value)}
-            className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition-colors ${selected ? "bg-accent text-dark" : "border border-white/10 text-white/60 hover:border-white/25 hover:text-white"}`}
+            className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition-colors ${selected ? "bg-dark text-white" : "border border-black/10 bg-white/55 text-muted hover:border-black/25 hover:text-dark"}`}
           >
             {label}
           </button>
         );
       })}
-      <span className={`whitespace-nowrap text-xs text-white/45 transition-opacity ${isPending ? "opacity-100" : "opacity-0"}`} aria-live="polite">
+      <span className={`whitespace-nowrap text-xs text-muted transition-opacity ${isPending ? "opacity-100" : "opacity-0"}`} aria-live="polite">
         Updating…
       </span>
     </div>
