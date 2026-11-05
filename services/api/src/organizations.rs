@@ -154,7 +154,7 @@ async fn find_organization(
         join public.users owner on owner.id = organization.owner_id
         where organization.slug = $1
           and owner.account_status = 'ACTIVE'
-          and (organization.verification_status = 'VERIFIED' or organization.owner_id = $2)
+          and (organization.verification_status <> 'REJECTED' or organization.owner_id = $2)
         "#,
     )
     .bind(slug)
@@ -257,7 +257,7 @@ pub async fn list_organization_quests(
     slug: web::Path<String>,
 ) -> Result<web::Json<Vec<OrganizationQuest>>, OrganizationError> {
     let exists = sqlx::query_scalar::<_, bool>(
-        "select exists(select 1 from public.organizations organization join public.users owner on owner.id = organization.owner_id where organization.slug = $1 and organization.verification_status = 'VERIFIED' and owner.account_status = 'ACTIVE')",
+        "select exists(select 1 from public.organizations organization join public.users owner on owner.id = organization.owner_id where organization.slug = $1 and organization.verification_status <> 'REJECTED' and owner.account_status = 'ACTIVE')",
     )
     .bind(slug.as_str())
     .fetch_one(&state.database)
