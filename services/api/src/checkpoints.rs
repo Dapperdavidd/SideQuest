@@ -18,12 +18,25 @@ pub struct Checkpoint {
     instructions: Option<String>,
     verification_code: Option<Uuid>,
     completed_at: Option<DateTime<Utc>>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    radius_m: i16,
 }
+
+/// A hunt has between 2 and 8 stops (2 is enforced when the quest is published).
+pub const MAX_HUNT_STOPS: i16 = 8;
+pub const DEFAULT_GEOFENCE_METERS: i16 = 75;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateCheckpoint {
     title: String,
     instructions: Option<String>,
+    #[serde(default)]
+    latitude: Option<f64>,
+    #[serde(default)]
+    longitude: Option<f64>,
+    #[serde(default)]
+    radius_m: Option<i16>,
 }
 
 impl CreateCheckpoint {
@@ -36,13 +49,41 @@ impl CreateCheckpoint {
         {
             return Err(CheckpointError::InvalidCheckpoint);
         }
+        match (self.latitude, self.longitude) {
+            (None, None) => {}
+            (Some(latitude), Some(longitude))
+                if latitude.is_finite()
+                    && longitude.is_finite()
+                    && (-90.0..=90.0).contains(&latitude)
+                    && (-180.0..=180.0).contains(&longitude) => {}
+            _ => return Err(CheckpointError::InvalidCheckpoint),
+        }
+        if self
+            .radius_m
+            .is_some_and(|radius| !(25..=500).contains(&radius))
+        {
+            return Err(CheckpointError::InvalidCheckpoint);
+        }
         Ok(())
     }
+}
+
+/// Great-circle distance in metres between two coordinates.
+pub fn distance_meters(from: (f64, f64), to: (f64, f64)) -> f64 {
+    let (lat1, lon1) = (from.0.to_radians(), from.1.to_radians());
+    let (lat2, lon2) = (to.0.to_radians(), to.1.to_radians());
+    let a = ((lat2 - lat1) / 2.0).sin().powi(2)
+        + lat1.cos() * lat2.cos() * ((lon2 - lon1) / 2.0).sin().powi(2);
+    6_371_000.0 * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CompleteCheckpoint {
     verification_code: Uuid,
+    #[serde(default)]
+    latitude: Option<f64>,
+    #[serde(default)]
+    longitude: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,7 +105,7 @@ pub enum CheckpointError {
     NotCreator,
     #[error("checkpoints can only be changed while the quest is a draft")]
     QuestLocked,
-    #[error("a quest can have at most twenty checkpoints")]
+    #[error("a hunt can have at most eight stops")]
     CheckpointLimit,
     #[error("checkpoint details are invalid")]
     InvalidCheckpoint,
@@ -76,6 +117,8 @@ pub enum CheckpointError {
     OutOfOrder,
     #[error("the checkpoint code is invalid")]
     InvalidCode,
+    #[error("you need to be at this stop to scan it")]
+    OutsideGeofence,
     #[error("checkpoint service is temporarily unavailable")]
     Database,
 }
@@ -90,7 +133,8 @@ impl ResponseError for CheckpointError {
             | Self::CheckpointLimit
             | Self::NotParticipant
             | Self::QuestClosed
-            | Self::OutOfOrder => StatusCode::CONFLICT,
+            | Self::OutOfOrder
+            | Self::OutsideGeofence => StatusCode::CONFLICT,
             Self::InvalidCheckpoint | Self::InvalidCode => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Database => StatusCode::SERVICE_UNAVAILABLE,
         }
@@ -111,6 +155,7 @@ impl ResponseError for CheckpointError {
                 Self::QuestClosed => "quest_not_open",
                 Self::OutOfOrder => "checkpoint_out_of_order",
                 Self::InvalidCode => "invalid_checkpoint_code",
+                Self::OutsideGeofence => "outside_checkpoint_geofence",
                 Self::Database => "checkpoint_service_unavailable",
                 Self::Auth(_) => unreachable!(),
             },
@@ -160,7 +205,10 @@ pub async fn list_checkpoints(
                c.title,
                c.instructions,
                case when q.creator_id = $2 then c.verification_code else null end as verification_code,
-               progress.completed_at
+               progress.completed_at,
+               c.latitude,
+               c.longitude,
+               c.radius_m
         from public.quest_checkpoints c
         join public.quests q on q.id = c.quest_id
         left join public.checkpoint_progress progress
@@ -213,21 +261,25 @@ pub async fn create_checkpoint(
     .fetch_one(&mut *transaction)
     .await
     .map_err(|_| CheckpointError::Database)?;
-    if next_position > 20 {
+    if next_position > MAX_HUNT_STOPS {
         return Err(CheckpointError::CheckpointLimit);
     }
     let created = sqlx::query_as::<_, Checkpoint>(
         r#"
-        insert into public.quest_checkpoints (quest_id, position, title, instructions)
-        values ($1, $2, $3, $4)
+        insert into public.quest_checkpoints (quest_id, position, title, instructions, latitude, longitude, radius_m)
+        values ($1, $2, $3, $4, $5, $6, $7)
         returning id, quest_id, position, title, instructions,
-                  verification_code, null::timestamptz as completed_at
+                  verification_code, null::timestamptz as completed_at,
+                  latitude, longitude, radius_m
         "#,
     )
     .bind(quest_id)
     .bind(next_position)
     .bind(checkpoint.title.trim())
     .bind(checkpoint.instructions.as_deref().map(str::trim))
+    .bind(checkpoint.latitude)
+    .bind(checkpoint.longitude)
+    .bind(checkpoint.radius_m.unwrap_or(DEFAULT_GEOFENCE_METERS))
     .fetch_one(&mut *transaction)
     .await
     .map_err(|_| CheckpointError::Database)?;
@@ -280,10 +332,15 @@ pub async fn complete_checkpoint(
         .begin()
         .await
         .map_err(|_| CheckpointError::Database)?;
-    let checkpoint = sqlx::query_as::<_, (i16, Uuid, String, DateTime<Utc>, bool)>(
+    #[allow(clippy::type_complexity)]
+    let checkpoint = sqlx::query_as::<
+        _,
+        (i16, Uuid, String, DateTime<Utc>, bool, bool, Option<f64>, Option<f64>, i16),
+    >(
         r#"
         select c.position, c.verification_code, q.status::text, q.deadline,
-               exists(select 1 from public.quest_participants p where p.quest_id = q.id and p.user_id = $3)
+               exists(select 1 from public.quest_participants p where p.quest_id = q.id and p.user_id = $3),
+               q.hunt_ordered, c.latitude, c.longitude, c.radius_m
         from public.quest_checkpoints c
         join public.quests q on q.id = c.quest_id
         where c.id = $1 and c.quest_id = $2
@@ -306,6 +363,19 @@ pub async fn complete_checkpoint(
     if checkpoint.1 != completion.verification_code {
         return Err(CheckpointError::InvalidCode);
     }
+    if let (Some(stop_latitude), Some(stop_longitude)) = (checkpoint.6, checkpoint.7) {
+        let inside = match (completion.latitude, completion.longitude) {
+            (Some(latitude), Some(longitude)) if latitude.is_finite() && longitude.is_finite() => {
+                distance_meters((latitude, longitude), (stop_latitude, stop_longitude))
+                    <= f64::from(checkpoint.8)
+            }
+            _ => false,
+        };
+        if !inside {
+            return Err(CheckpointError::OutsideGeofence);
+        }
+    }
+    let ordered = checkpoint.5;
     let missing_earlier = sqlx::query_scalar::<_, bool>(
         r#"
         select exists(
@@ -324,7 +394,7 @@ pub async fn complete_checkpoint(
     .fetch_one(&mut *transaction)
     .await
     .map_err(|_| CheckpointError::Database)?;
-    if missing_earlier {
+    if ordered && missing_earlier {
         return Err(CheckpointError::OutOfOrder);
     }
     let completed_at = sqlx::query_scalar::<_, DateTime<Utc>>(
@@ -377,16 +447,40 @@ mod tests {
         let valid = CreateCheckpoint {
             title: "Find the mural".to_string(),
             instructions: Some("Scan the code beside the entrance.".to_string()),
+            latitude: Some(6.5095),
+            longitude: Some(3.3711),
+            radius_m: Some(75),
         };
         assert!(valid.validate().is_ok());
+
+        let half_located = CreateCheckpoint {
+            longitude: None,
+            ..valid
+        };
+        assert!(matches!(
+            half_located.validate(),
+            Err(CheckpointError::InvalidCheckpoint)
+        ));
 
         let invalid = CreateCheckpoint {
             title: "x".to_string(),
             instructions: None,
+            latitude: None,
+            longitude: None,
+            radius_m: None,
         };
         assert!(matches!(
             invalid.validate(),
             Err(CheckpointError::InvalidCheckpoint)
         ));
+    }
+
+    #[test]
+    fn geofence_distance_matches_known_points() {
+        let yaba = (6.5095, 3.3711);
+        let nearby = (6.5100, 3.3711);
+        let distance = distance_meters(yaba, nearby);
+        assert!((50.0..=60.0).contains(&distance), "{distance}");
+        assert!(distance_meters(yaba, (6.4281, 3.4219)) > 10_000.0);
     }
 }

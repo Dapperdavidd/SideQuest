@@ -23,6 +23,11 @@ pub struct Profile {
     pub created_quests_count: i64,
     pub completed_quests_count: i64,
     pub wins_count: i64,
+    pub friends_count: i64,
+    pub groups_count: i64,
+    pub profile_visibility: String,
+    pub challenge_permission: String,
+    pub group_invite_permission: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,8 +87,8 @@ fn derive_achievements(profile: &Profile) -> Vec<Achievement> {
         (
             "COMMUNITY_BUILDER",
             "Community Builder",
-            "Reach ten followers.",
-            profile.followers_count,
+            "Make ten friends.",
+            profile.friends_count,
             10,
         ),
     ];
@@ -106,6 +111,9 @@ pub struct UpdateProfile {
     display_name: Option<String>,
     bio: Option<String>,
     avatar_url: Option<String>,
+    profile_visibility: Option<String>,
+    challenge_permission: Option<String>,
+    group_invite_permission: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -190,6 +198,20 @@ impl UpdateProfile {
         {
             return Err(ProfileError::InvalidBio);
         }
+        if self
+            .profile_visibility
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "PUBLIC" | "PRIVATE"))
+            || [&self.challenge_permission, &self.group_invite_permission]
+                .iter()
+                .any(|value| {
+                    value
+                        .as_deref()
+                        .is_some_and(|value| !matches!(value, "FRIENDS" | "NOBODY"))
+                })
+        {
+            return Err(ProfileError::InvalidBio);
+        }
         Ok(())
     }
 }
@@ -242,6 +264,9 @@ pub async fn update_me(
             display_name = coalesce($3, display_name),
             bio = coalesce($4, bio),
             avatar_url = coalesce($5, avatar_url),
+            profile_visibility = coalesce($6, profile_visibility),
+            challenge_permission = coalesce($7, challenge_permission),
+            group_invite_permission = coalesce($8, group_invite_permission),
             updated_at = now()
         where id = $1
         "#,
@@ -251,6 +276,9 @@ pub async fn update_me(
     .bind(changes.display_name.as_deref().map(str::trim))
     .bind(changes.bio.as_deref().map(str::trim))
     .bind(changes.avatar_url.as_deref())
+    .bind(changes.profile_visibility.as_deref())
+    .bind(changes.challenge_permission.as_deref())
+    .bind(changes.group_invite_permission.as_deref())
     .execute(&state.database)
     .await;
 
@@ -506,7 +534,10 @@ async fn find_profile(
                (select count(*) from public.user_follows f where f.follower_id = u.id) as following_count,
                (select count(*) from public.quests q where q.creator_id = u.id) as created_quests_count,
                (select count(distinct e.quest_id) from public.quest_entries e join public.quests q on q.id = e.quest_id where e.participant_id = u.id and q.status = 'FINALIZED') as completed_quests_count,
-               (select count(*) from public.quest_winners w join public.quest_entries e on e.id = w.entry_id where e.participant_id = u.id) as wins_count
+               (select count(*) from public.quest_winners w join public.quest_entries e on e.id = w.entry_id where e.participant_id = u.id) as wins_count,
+               (select count(*) from public.friendships fr where fr.status = 'ACCEPTED' and (fr.requester_id = u.id or fr.addressee_id = u.id)) as friends_count,
+               (select count(*) from public.friend_group_members gm where gm.user_id = u.id) as groups_count,
+               u.profile_visibility, u.challenge_permission, u.group_invite_permission
         from public.users u
         where {predicate} and u.account_status = 'ACTIVE'
         "#,
@@ -536,7 +567,10 @@ async fn list_relationship_profiles(
                (select count(*) from public.user_follows x where x.follower_id = u.id) as following_count,
                (select count(*) from public.quests q where q.creator_id = u.id) as created_quests_count,
                (select count(distinct e.quest_id) from public.quest_entries e join public.quests q on q.id = e.quest_id where e.participant_id = u.id and q.status = 'FINALIZED') as completed_quests_count,
-               (select count(*) from public.quest_winners w join public.quest_entries e on e.id = w.entry_id where e.participant_id = u.id) as wins_count
+               (select count(*) from public.quest_winners w join public.quest_entries e on e.id = w.entry_id where e.participant_id = u.id) as wins_count,
+               (select count(*) from public.friendships fr where fr.status = 'ACCEPTED' and (fr.requester_id = u.id or fr.addressee_id = u.id)) as friends_count,
+               (select count(*) from public.friend_group_members gm where gm.user_id = u.id) as groups_count,
+               u.profile_visibility, u.challenge_permission, u.group_invite_permission
         from public.users u
         join public.user_follows f on {join_condition}
         where u.account_status = 'ACTIVE'
@@ -565,6 +599,9 @@ mod tests {
             display_name: None,
             bio: None,
             avatar_url: None,
+            profile_visibility: None,
+            challenge_permission: None,
+            group_invite_permission: None,
         }
     }
 
@@ -588,6 +625,9 @@ mod tests {
             display_name: None,
             bio: Some("x".repeat(241)),
             avatar_url: None,
+            profile_visibility: None,
+            challenge_permission: None,
+            group_invite_permission: None,
         };
         assert!(matches!(update.validate(), Err(ProfileError::InvalidBio)));
     }
@@ -608,6 +648,11 @@ mod tests {
             created_quests_count: 3,
             completed_quests_count: 1,
             wins_count: 0,
+            friends_count: 9,
+            groups_count: 1,
+            profile_visibility: "PUBLIC".to_string(),
+            challenge_permission: "FRIENDS".to_string(),
+            group_invite_permission: "FRIENDS".to_string(),
         };
         let achievements = derive_achievements(&profile);
         assert!(achievements[0].unlocked);

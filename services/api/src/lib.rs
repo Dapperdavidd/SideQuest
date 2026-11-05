@@ -2,6 +2,7 @@ pub mod admin;
 pub mod auth;
 pub mod checkpoints;
 pub mod entries;
+pub mod friends;
 pub mod invitations;
 pub mod moderation;
 pub mod notifications;
@@ -157,10 +158,24 @@ pub fn configure_routes(config: &mut web::ServiceConfig) {
             .service(admin::list_suspended_users)
             .service(admin::suspend_user)
             .service(admin::reinstate_user)
+            .service(friends::list_friends)
+            .service(friends::request_friend)
+            .service(friends::accept_friend)
+            .service(friends::list_groups)
+            .service(friends::create_group)
+            .service(friends::get_group)
+            .service(friends::list_challenges)
+            .service(friends::leave_group)
+            .service(friends::remove_friend)
+            .service(friends::preview_group_invite)
+            .service(friends::join_group)
+            .service(friends::get_ballot)
+            .service(friends::cast_vote)
             .service(quests::list_quests)
             .service(quests::list_my_quests)
             .service(quests::list_saved_quests)
             .service(quests::get_quest)
+            .service(quests::resolve_short_code)
             .service(quests::get_saved_quest_state)
             .service(quests::create_quest)
             .service(quests::update_quest)

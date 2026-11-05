@@ -34,6 +34,11 @@ pub async fn run_deadline_worker(state: AppState) {
             Ok(_) => {}
             Err(error) => tracing::warn!(%error, "quest deadline sweep failed"),
         }
+        match crate::friends::close_votes_once(&state).await {
+            Ok(closed) if closed > 0 => tracing::info!(closed, "closed room votes"),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "room vote sweep failed"),
+        }
         actix_web::rt::time::sleep(StdDuration::from_secs(15)).await;
     }
 }
@@ -52,6 +57,8 @@ const ALLOWED_PROOF_REQUIREMENTS: [&str; 6] = [
 pub enum WinnerSelectionMethod {
     FirstValid,
     BestSubmission,
+    /// Friends challenges only: each room member gets one vote, no self-votes.
+    RoomVote,
 }
 
 impl WinnerSelectionMethod {
@@ -59,9 +66,13 @@ impl WinnerSelectionMethod {
         match self {
             Self::FirstValid => "FIRST_VALID",
             Self::BestSubmission => "BEST_SUBMISSION",
+            Self::RoomVote => "ROOM_VOTE",
         }
     }
 }
+
+/// v5 caps official entries at seven for every quest.
+pub const MAX_OFFICIAL_ENTRIES: u8 = 7;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct QuestRules {
@@ -72,7 +83,7 @@ pub struct QuestRules {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum QuestValidationError {
-    #[error("max_entries must be between 1 and 10")]
+    #[error("max_entries must be between 1 and 7")]
     EntryLimit,
     #[error("winner_count must be between 1 and 3")]
     WinnerLimit,
@@ -82,7 +93,7 @@ pub enum QuestValidationError {
 
 impl QuestRules {
     pub fn validate(&self) -> Result<(), QuestValidationError> {
-        if !(1..=10).contains(&self.max_entries) {
+        if !(1..=MAX_OFFICIAL_ENTRIES).contains(&self.max_entries) {
             return Err(QuestValidationError::EntryLimit);
         }
         if !(1..=3).contains(&self.winner_count) {
@@ -133,6 +144,10 @@ pub struct Quest {
     pub created_at: DateTime<Utc>,
     pub published_at: Option<DateTime<Utc>>,
     pub viewer_joined: bool,
+    pub checkpoint_count: i64,
+    pub short_code: Option<String>,
+    pub hunt_ordered: bool,
+    pub friendly_stake: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +177,19 @@ pub struct CreateQuest {
     reward_currency: Option<String>,
     settlement_asset: Option<String>,
     deadline: DateTime<Utc>,
+    #[serde(default = "default_true")]
+    hunt_ordered: bool,
+    #[serde(default)]
+    friendly_stake: Option<String>,
+    /// Friends challenges: ALL_FRIENDS, GROUP (with `group_id`) or LINK (invite links only).
+    #[serde(default)]
+    audience: Option<String>,
+    #[serde(default)]
+    group_id: Option<Uuid>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_visibility() -> String {
@@ -198,10 +226,7 @@ impl QuestListQuery {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_ascii_uppercase);
-        if quest_type
-            .as_deref()
-            .is_some_and(|value| !matches!(value, "FRIENDS" | "BOUNTY" | "EXPLORE"))
-        {
+        if quest_type.as_deref().is_some_and(|value| value != "BOUNTY") {
             return Err(QuestError::InvalidQuest);
         }
         Ok(quest_type)
@@ -341,7 +366,7 @@ impl CreateQuest {
 
         if !(3..=100).contains(&self.title.trim().chars().count())
             || !(1..=2000).contains(&self.description.trim().chars().count())
-            || !matches!(self.quest_type.as_str(), "FRIENDS" | "BOUNTY" | "EXPLORE")
+            || !matches!(self.quest_type.as_str(), "FRIENDS" | "BOUNTY")
             || !matches!(
                 self.visibility.as_str(),
                 "PUBLIC" | "PRIVATE" | "INVITE_ONLY"
@@ -370,8 +395,7 @@ impl CreateQuest {
                     .iter()
                     .any(|proof| proof == "LOCATION") => {}
             (Some(name), Some(latitude), Some(longitude))
-                if self.quest_type == "EXPLORE"
-                    && (2..=120).contains(&name.trim().chars().count())
+                if (2..=120).contains(&name.trim().chars().count())
                     && latitude.is_finite()
                     && longitude.is_finite()
                     && (-90.0..=90.0).contains(&latitude)
@@ -409,6 +433,32 @@ impl CreateQuest {
         } else if self.reward_amount_minor.is_some()
             || self.reward_currency.is_some()
             || self.settlement_asset.is_some()
+        {
+            return Err(QuestError::InvalidQuest);
+        }
+
+        // Friends challenges stay among invited people and never carry money. A friendly
+        // stake is plain text ("Loser buys suya") and only exists on Friends challenges.
+        if self.quest_type == "FRIENDS" && (self.visibility == "PUBLIC" || self.reward_enabled) {
+            return Err(QuestError::InvalidQuest);
+        }
+        if self.winner_selection_method == WinnerSelectionMethod::RoomVote
+            && self.quest_type != "FRIENDS"
+        {
+            return Err(QuestError::InvalidQuest);
+        }
+        match (
+            self.quest_type.as_str(),
+            self.audience.as_deref(),
+            self.group_id,
+        ) {
+            ("BOUNTY", None, None)
+            | ("FRIENDS", None | Some("ALL_FRIENDS") | Some("LINK"), None)
+            | ("FRIENDS", Some("GROUP"), Some(_)) => {}
+            _ => return Err(QuestError::InvalidQuest),
+        }
+        if let Some(stake) = self.friendly_stake.as_deref()
+            && (self.quest_type != "FRIENDS" || !(2..=120).contains(&stake.trim().chars().count()))
         {
             return Err(QuestError::InvalidQuest);
         }
@@ -470,6 +520,10 @@ pub async fn list_quests(
                q.status::text as status,
                (select count(*) from public.quest_entries e where e.quest_id = q.id) as entries_received,
                (select count(*) from public.quest_participants p where p.quest_id = q.id) as participants_joined,
+               (select count(*) from public.quest_checkpoints c where c.quest_id = q.id) as checkpoint_count,
+               q.short_code,
+               q.hunt_ordered,
+               q.friendly_stake,
                q.created_at,
                q.published_at,
                false as viewer_joined
@@ -489,6 +543,7 @@ pub async fn list_quests(
         where q.visibility = 'PUBLIC'
           and u.account_status = 'ACTIVE'
           and q.status in ('OPEN', 'CLOSED_FOR_REVIEW', 'REVIEWING', 'FINALIZED')
+          and q.quest_type = 'BOUNTY'
           and ($2::text is null or q.quest_type::text = $2)
           and (
             $4::uuid is null
@@ -525,6 +580,61 @@ pub async fn list_quests(
     .map_err(|_| QuestError::Database)?;
 
     Ok(web::Json(quests))
+}
+
+/// Base32 alphabet without the look-alike characters 0, 1, I, L and O.
+pub const SHORT_CODE_ALPHABET: &str = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+pub fn is_valid_short_code(code: &str) -> bool {
+    (6..=8).contains(&code.len())
+        && code
+            .chars()
+            .all(|character| SHORT_CODE_ALPHABET.contains(character.to_ascii_uppercase()))
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct ShortCodeTarget {
+    quest_id: Uuid,
+    short_code: String,
+    quest_type: String,
+    creator_display_name: String,
+}
+
+/// Resolves a share link code (sdqst.app/q/CODE) to its quest. Access to the quest itself is
+/// still decided by `GET /quests/{id}`, so private Friends challenges stay private.
+#[get("/q/{code}")]
+pub async fn resolve_short_code(
+    state: web::Data<AppState>,
+    code: web::Path<String>,
+) -> Result<web::Json<ShortCodeTarget>, QuestError> {
+    let code = code.into_inner();
+    if !is_valid_short_code(&code) {
+        return Err(QuestError::NotFound);
+    }
+    let target = sqlx::query_as::<_, ShortCodeTarget>(
+        r#"
+        select q.id as quest_id, q.short_code, q.quest_type::text as quest_type,
+               u.display_name as creator_display_name
+        from public.quests q
+        join public.users u on u.id = q.creator_id
+        where q.short_code = upper($1)
+          and q.status not in ('DRAFT', 'CANCELLED', 'SUSPENDED')
+        "#,
+    )
+    .bind(&code)
+    .fetch_optional(&state.database)
+    .await
+    .map_err(|_| QuestError::Database)?
+    .ok_or(QuestError::NotFound)?;
+
+    // Scan and open counts per code, with no personal data, for the creator's quest stats.
+    sqlx::query("insert into public.quest_link_opens (quest_id) values ($1)")
+        .bind(target.quest_id)
+        .execute(&state.database)
+        .await
+        .ok();
+
+    Ok(web::Json(target))
 }
 
 #[get("/quests/{quest_id}")]
@@ -729,7 +839,7 @@ pub async fn create_quest(
 
     if let Some(organization_id) = quest.organization_id {
         let authorized = sqlx::query_scalar::<_, bool>(
-            "select exists(select 1 from public.organizations where id = $1 and owner_id = $2 and verification_status = 'VERIFIED')",
+            "select exists(select 1 from public.organizations where id = $1 and owner_id = $2)",
         )
         .bind(organization_id)
         .bind(user.id)
@@ -748,12 +858,13 @@ pub async fn create_quest(
           location_name, latitude, longitude, quest_type, visibility,
           is_group_challenge, required_group_size, group_instructions, max_entries, winner_count,
           winner_selection_method, proof_requirements, judging_criteria,
-          reward_enabled, reward_amount_minor, reward_currency, settlement_asset, deadline
+          reward_enabled, reward_amount_minor, reward_currency, settlement_asset, deadline,
+          hunt_ordered, friendly_stake
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8, $9::quest_type, $10::quest_visibility,
           $11, $12, $13, $14, $15, $16::winner_selection_method, $17, $18,
-          $19, $20, $21, $22, $23
+          $19, $20, $21, $22, $23, $24, $25
         )
         returning id
         "#,
@@ -781,10 +892,13 @@ pub async fn create_quest(
     .bind(quest.reward_currency.as_deref())
     .bind(quest.settlement_asset.as_deref())
     .bind(quest.deadline)
+    .bind(quest.hunt_ordered)
+    .bind(quest.friendly_stake.as_deref().map(str::trim))
     .fetch_one(&state.database)
     .await
     .map_err(|_| QuestError::Database)?;
 
+    assign_audience(&state, created_id, user.id, &quest).await?;
     let created = find_creator_quest(&state, created_id, user.id).await?;
     Ok((web::Json(created), StatusCode::CREATED))
 }
@@ -802,7 +916,7 @@ pub async fn update_quest(
 
     if let Some(organization_id) = quest.organization_id {
         let authorized = sqlx::query_scalar::<_, bool>(
-            "select exists(select 1 from public.organizations where id = $1 and owner_id = $2 and verification_status = 'VERIFIED')",
+            "select exists(select 1 from public.organizations where id = $1 and owner_id = $2)",
         )
         .bind(organization_id)
         .bind(user.id)
@@ -839,6 +953,9 @@ pub async fn update_quest(
             reward_currency = $22,
             settlement_asset = $23,
             deadline = $24,
+            hunt_ordered = $25,
+            friendly_stake = $26,
+            group_id = null,
             updated_at = now()
         where id = $1 and creator_id = $2 and status = 'DRAFT'
         returning id
@@ -868,6 +985,8 @@ pub async fn update_quest(
     .bind(quest.reward_currency.as_deref())
     .bind(quest.settlement_asset.as_deref())
     .bind(quest.deadline)
+    .bind(quest.hunt_ordered)
+    .bind(quest.friendly_stake.as_deref().map(str::trim))
     .fetch_optional(&state.database)
     .await
     .map_err(|_| QuestError::Database)?;
@@ -887,6 +1006,7 @@ pub async fn update_quest(
         };
     }
 
+    assign_audience(&state, quest_id, user.id, &quest).await?;
     Ok(web::Json(
         find_creator_quest(&state, quest_id, user.id).await?,
     ))
@@ -906,6 +1026,8 @@ pub async fn publish_quest(
         update public.quests
         set status = case when reward_enabled then 'AWAITING_FUNDING'::quest_status else 'OPEN'::quest_status end,
             published_at = case when reward_enabled then published_at else now() end,
+            votes_close_at = case when winner_selection_method = 'ROOM_VOTE'
+                                  then deadline + interval '24 hours' else votes_close_at end,
             updated_at = now()
         where id = $1
           and creator_id = $2
@@ -913,7 +1035,7 @@ pub async fn publish_quest(
           and deadline > now()
           and (
             not ('QR_CHECKPOINT' = any(proof_requirements))
-            or exists(select 1 from public.quest_checkpoints c where c.quest_id = quests.id)
+            or (select count(*) from public.quest_checkpoints c where c.quest_id = quests.id) >= 2
           )
         returning status::text
         "#,
@@ -929,7 +1051,7 @@ pub async fn publish_quest(
             r#"
             select creator_id, status::text, deadline,
                    not ('QR_CHECKPOINT' = any(proof_requirements))
-                   or exists(select 1 from public.quest_checkpoints c where c.quest_id = quests.id)
+                   or (select count(*) from public.quest_checkpoints c where c.quest_id = quests.id) >= 2
             from public.quests where id = $1
             "#,
         )
@@ -947,9 +1069,106 @@ pub async fn publish_quest(
         };
     }
 
+    if result.as_deref() == Some("OPEN") {
+        notify_challenge_room(&state, quest_id, user.id).await;
+    }
+
     Ok(web::Json(
         find_creator_quest(&state, quest_id, user.id).await?,
     ))
+}
+
+/// Saves who a Friends challenge was sent to: one group the creator belongs to, or every
+/// accepted friend who allows challenges. Link-only challenges have no stored audience.
+async fn assign_audience(
+    state: &AppState,
+    quest_id: Uuid,
+    creator_id: Uuid,
+    quest: &CreateQuest,
+) -> Result<(), QuestError> {
+    if quest.quest_type != "FRIENDS" {
+        return Ok(());
+    }
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| QuestError::Database)?;
+    sqlx::query("delete from public.quest_audience where quest_id = $1")
+        .bind(quest_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| QuestError::Database)?;
+    match (quest.audience.as_deref(), quest.group_id) {
+        (Some("GROUP"), Some(group_id)) => {
+            let member = sqlx::query_scalar::<_, bool>(
+                "select exists(select 1 from public.friend_group_members where group_id = $1 and user_id = $2)",
+            )
+            .bind(group_id)
+            .bind(creator_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|_| QuestError::Database)?;
+            if !member {
+                return Err(QuestError::InvalidQuest);
+            }
+            sqlx::query("update public.quests set group_id = $2 where id = $1")
+                .bind(quest_id)
+                .bind(group_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|_| QuestError::Database)?;
+        }
+        (None | Some("ALL_FRIENDS"), _) => {
+            sqlx::query(
+                r#"
+                insert into public.quest_audience (quest_id, user_id)
+                select $1, friend.id
+                from public.friendships f
+                join public.users friend
+                  on friend.id = case when f.requester_id = $2 then f.addressee_id else f.requester_id end
+                where f.status = 'ACCEPTED'
+                  and (f.requester_id = $2 or f.addressee_id = $2)
+                  and friend.challenge_permission = 'FRIENDS'
+                  and friend.account_status = 'ACTIVE'
+                on conflict do nothing
+                "#,
+            )
+            .bind(quest_id)
+            .bind(creator_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| QuestError::Database)?;
+        }
+        _ => {}
+    }
+    transaction.commit().await.map_err(|_| QuestError::Database)
+}
+
+/// Tells everyone a Friends challenge was sent to. Best effort: a failed notification never
+/// blocks publishing.
+async fn notify_challenge_room(state: &AppState, quest_id: Uuid, creator_id: Uuid) {
+    let _ = sqlx::query(
+        r#"
+        insert into public.notifications (user_id, actor_id, quest_id, kind, title, body, href)
+        select recipient.user_id, $2, q.id, 'CHALLENGE_RECEIVED'::notification_kind,
+               'New challenge', left(creator.display_name || ' challenged you: ' || q.title, 300),
+               '/quests/' || q.id
+        from public.quests q
+        join public.users creator on creator.id = q.creator_id
+        join (
+          select a.user_id from public.quest_audience a where a.quest_id = $1
+          union
+          select m.user_id from public.friend_group_members m
+          join public.quests gq on gq.group_id = m.group_id where gq.id = $1
+        ) recipient on recipient.user_id <> $2
+        where q.id = $1 and q.quest_type = 'FRIENDS'
+        "#,
+    )
+    .bind(quest_id)
+    .bind(creator_id)
+    .execute(&state.database)
+    .await;
 }
 
 #[post("/quests/{quest_id}/join")]
@@ -964,6 +1183,8 @@ pub async fn join_quest(
         r#"
         select creator_id, status::text, deadline, visibility::text,
                exists(select 1 from public.quest_participants where quest_id = $1 and user_id = $2)
+               or exists(select 1 from public.quest_audience a where a.quest_id = $1 and a.user_id = $2)
+               or exists(select 1 from public.friend_group_members m where m.group_id = quests.group_id and m.user_id = $2)
         from public.quests where id = $1
         "#,
     )
@@ -1212,6 +1433,10 @@ async fn find_quest(
                q.status::text as status,
                (select count(*) from public.quest_entries e where e.quest_id = q.id) as entries_received,
                (select count(*) from public.quest_participants p where p.quest_id = q.id) as participants_joined,
+               (select count(*) from public.quest_checkpoints c where c.quest_id = q.id) as checkpoint_count,
+               q.short_code,
+               q.hunt_ordered,
+               q.friendly_stake,
                q.created_at,
                q.published_at,
                ($4::uuid is not null and exists(
@@ -1232,6 +1457,14 @@ async fn find_quest(
               or exists(
                 select 1 from public.quest_participants access_membership
                 where access_membership.quest_id = q.id and access_membership.user_id = $4
+              )
+              or exists(
+                select 1 from public.quest_audience access_audience
+                where access_audience.quest_id = q.id and access_audience.user_id = $4
+              )
+              or exists(
+                select 1 from public.friend_group_members access_group
+                where access_group.group_id = q.group_id and access_group.user_id = $4
               )
             ))
           )
@@ -1268,7 +1501,7 @@ mod tests {
             location_name: None,
             latitude: None,
             longitude: None,
-            quest_type: "EXPLORE".to_string(),
+            quest_type: "BOUNTY".to_string(),
             visibility: "PUBLIC".to_string(),
             is_group_challenge: false,
             required_group_size: None,
@@ -1283,12 +1516,16 @@ mod tests {
             reward_currency: None,
             settlement_asset: None,
             deadline: Utc::now() + chrono::Duration::days(7),
+            hunt_ordered: true,
+            friendly_stake: None,
+            audience: None,
+            group_id: None,
         }
     }
 
     #[test]
     fn accepts_product_limits() {
-        assert!(rules(10, 3).validate().is_ok());
+        assert!(rules(7, 3).validate().is_ok());
     }
 
     #[test]
@@ -1305,9 +1542,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_more_than_ten_entries() {
+    fn rejects_more_than_seven_entries() {
         assert_eq!(
-            rules(11, 1).validate(),
+            rules(8, 1).validate(),
             Err(QuestValidationError::EntryLimit)
         );
     }
@@ -1346,7 +1583,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_complete_explore_location_and_rejects_partial_coordinates() {
+    fn accepts_complete_bounty_location_and_rejects_partial_coordinates() {
         let mut quest = valid_quest();
         quest.proof_requirements.push("LOCATION".to_string());
         quest.location_name = Some("Freedom Park, Lagos".to_string());
@@ -1363,7 +1600,7 @@ mod tests {
         let valid = QuestListQuery {
             limit: None,
             search: None,
-            quest_type: Some("EXPLORE".to_string()),
+            quest_type: Some("BOUNTY".to_string()),
             latitude: Some(6.5244),
             longitude: Some(3.3792),
             radius_km: Some(25.0),
@@ -1419,7 +1656,7 @@ mod tests {
         let query = QuestListQuery {
             limit: None,
             search: Some("  sunset walk  ".to_string()),
-            quest_type: Some("explore".to_string()),
+            quest_type: Some("bounty".to_string()),
             latitude: None,
             longitude: None,
             radius_km: None,
@@ -1430,7 +1667,7 @@ mod tests {
         );
         assert_eq!(
             query.normalized_quest_type().unwrap().as_deref(),
-            Some("EXPLORE")
+            Some("BOUNTY")
         );
     }
 
@@ -1461,6 +1698,59 @@ mod tests {
             long_search.normalized_search(),
             Err(QuestError::InvalidQuest)
         ));
+    }
+
+    #[test]
+    fn friends_challenges_are_private_and_moneyless() {
+        let mut quest = valid_quest();
+        quest.quest_type = "FRIENDS".to_string();
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+        quest.visibility = "INVITE_ONLY".to_string();
+        assert!(quest.validate().is_ok());
+        quest.reward_enabled = true;
+        quest.reward_amount_minor = Some(1_000_000);
+        quest.reward_currency = Some("NIM".to_string());
+        quest.settlement_asset = Some("NIM".to_string());
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
+    fn friendly_stakes_are_text_on_friends_challenges_only() {
+        let mut quest = valid_quest();
+        quest.friendly_stake = Some("Loser buys suya".to_string());
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+        quest.quest_type = "FRIENDS".to_string();
+        quest.visibility = "INVITE_ONLY".to_string();
+        assert!(quest.validate().is_ok());
+        quest.friendly_stake = Some("x".to_string());
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
+    fn room_votes_are_for_friends_challenges() {
+        let mut quest = valid_quest();
+        quest.winner_selection_method = WinnerSelectionMethod::RoomVote;
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+        quest.quest_type = "FRIENDS".to_string();
+        quest.visibility = "INVITE_ONLY".to_string();
+        assert!(quest.validate().is_ok());
+    }
+
+    #[test]
+    fn explore_mode_is_retired() {
+        let mut quest = valid_quest();
+        quest.quest_type = "EXPLORE".to_string();
+        assert!(matches!(quest.validate(), Err(QuestError::InvalidQuest)));
+    }
+
+    #[test]
+    fn short_codes_use_unambiguous_alphabet() {
+        assert!(is_valid_short_code("MKSUN7"));
+        assert!(!is_valid_short_code("LKSUN7"));
+        assert!(is_valid_short_code("ab3d5f7h"));
+        assert!(!is_valid_short_code("LK0O1I"));
+        assert!(!is_valid_short_code("ABC"));
+        assert!(!is_valid_short_code("ABCDEFGHJ"));
     }
 
     #[test]

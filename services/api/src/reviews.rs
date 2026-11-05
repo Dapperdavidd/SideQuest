@@ -676,6 +676,12 @@ pub async fn finalize_quest(
     let method: String = quest
         .try_get("winner_selection_method")
         .map_err(|_| ReviewError::Database)?;
+    if method == "ROOM_VOTE" {
+        // Room votes are tallied by the vote-close worker, never picked by the creator.
+        return Err(ReviewError::Finalization(
+            FinalizationError::InvalidWinnerSelection,
+        ));
+    }
     let winners = if method == "FIRST_VALID" {
         if !selection.winner_entry_ids.is_empty() {
             return Err(ReviewError::Finalization(
