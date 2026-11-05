@@ -16,11 +16,19 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const background = Color(0xFFF8F8F5);
-const ink = Color(0xFF171917);
-const muted = Color(0xFF6F756F);
-const accent = Color(0xFFC7FF00);
-const line = Color(0xFFE6E8E2);
+import 'v5/friends.dart';
+import 'v5/map.dart';
+
+// SideQuest v5 tokens: white ground, ink text, one lime accent.
+const background = Color(0xFFFFFFFF);
+const ink = Color(0xFF111111);
+const muted = Color(0xFF55565C);
+const accent = Color(0xFFE0FE5E);
+const line = Color(0xFFE7E7EA);
+const sunken = Color(0xFFF3F3F5);
+const coral = Color(0xFFFF7A59);
+const limeTint = Color(0xFFF2FFC2);
+const maxOfficialEntries = 7;
 const apiBaseUrl = String.fromEnvironment(
   'API_URL',
   defaultValue: 'http://127.0.0.1:8080/api/v1',
@@ -170,6 +178,31 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/notifications',
         builder: (context, state) => const NotificationsScreen(),
       ),
+      GoRoute(path: '/map', builder: (context, state) => const MapScreen()),
+      GoRoute(
+        path: '/friends',
+        builder: (context, state) => const FriendsScreen(),
+      ),
+      GoRoute(
+        path: '/friends/groups/:id',
+        builder: (context, state) =>
+            GroupRoomScreen(groupId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/quests/:id/vote',
+        builder: (context, state) =>
+            VoteScreen(questId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/g/:code',
+        builder: (context, state) =>
+            GroupInviteScreen(code: state.pathParameters['code']!),
+      ),
+      GoRoute(
+        path: '/q/:code',
+        builder: (context, state) =>
+            ShortLinkScreen(code: state.pathParameters['code']!),
+      ),
     ],
   );
 });
@@ -235,6 +268,10 @@ class Quest {
     this.organizationSlug,
     this.organizationDisplayName,
     this.judgingCriteria,
+    this.checkpointCount = 0,
+    this.shortCode,
+    this.friendlyStake,
+    this.huntOrdered = true,
   });
 
   factory Quest.fromJson(Map<String, dynamic> json) => Quest(
@@ -272,6 +309,10 @@ class Quest {
     organizationSlug: json['organization_slug'] as String?,
     organizationDisplayName: json['organization_display_name'] as String?,
     judgingCriteria: json['judging_criteria'] as String?,
+    checkpointCount: (json['checkpoint_count'] as num?)?.toInt() ?? 0,
+    shortCode: json['short_code'] as String?,
+    friendlyStake: json['friendly_stake'] as String?,
+    huntOrdered: json['hunt_ordered'] as bool? ?? true,
   );
 
   final String id;
@@ -306,6 +347,18 @@ class Quest {
   final String? organizationSlug;
   final String? organizationDisplayName;
   final String? judgingCriteria;
+  final int checkpointCount;
+  final String? shortCode;
+  final String? friendlyStake;
+  final bool huntOrdered;
+
+  /// A quest with two or more stops is a scavenger hunt.
+  bool get isHunt => checkpointCount >= 2;
+
+  /// Short share link (sdqst.app/q/CODE), or the full quest URL for older quests.
+  Uri get shareUrl => shortCode == null
+      ? Uri.parse(webBaseUrl).resolve('/quests/$id')
+      : Uri.parse(webBaseUrl).resolve('/q/$shortCode');
 
   String get image =>
       coverMediaUrl ??
@@ -316,7 +369,9 @@ class Quest {
       };
 
   String get rewardLabel {
-    if (!rewardEnabled || rewardAmountMinor == null) return 'Just for fun';
+    if (!rewardEnabled || rewardAmountMinor == null) {
+      return friendlyStake ?? (questType == 'FRIENDS' ? 'Glory' : 'Recognition');
+    }
     final amount = rewardAmountMinor! / 100000;
     final formatted = amount == amount.roundToDouble()
         ? amount.toStringAsFixed(0)
@@ -340,6 +395,9 @@ class QuestCheckpoint {
     required this.instructions,
     required this.verificationCode,
     required this.completedAt,
+    this.latitude,
+    this.longitude,
+    this.radiusMeters = 75,
   });
 
   factory QuestCheckpoint.fromJson(Map<String, dynamic> json) =>
@@ -353,6 +411,9 @@ class QuestCheckpoint {
         completedAt: json['completed_at'] == null
             ? null
             : DateTime.parse(json['completed_at'] as String).toLocal(),
+        latitude: (json['latitude'] as num?)?.toDouble(),
+        longitude: (json['longitude'] as num?)?.toDouble(),
+        radiusMeters: (json['radius_m'] as num?)?.toInt() ?? 75,
       );
 
   final String id;
@@ -362,6 +423,12 @@ class QuestCheckpoint {
   final String? instructions;
   final String? verificationCode;
   final DateTime? completedAt;
+  final double? latitude;
+  final double? longitude;
+  final int radiusMeters;
+
+  /// Stops with coordinates count only when scanned inside their zone.
+  bool get hasGeofence => latitude != null && longitude != null;
 
   QuestCheckpoint completed(DateTime timestamp) => QuestCheckpoint(
     id: id,
@@ -371,6 +438,9 @@ class QuestCheckpoint {
     instructions: instructions,
     verificationCode: verificationCode,
     completedAt: timestamp,
+    latitude: latitude,
+    longitude: longitude,
+    radiusMeters: radiusMeters,
   );
 }
 
@@ -537,9 +607,9 @@ class QuestRepository {
     final response = await _dio.get<List<dynamic>>(
       '/quests',
       queryParameters: latitude == null || longitude == null
-          ? null
+          ? {'quest_type': 'BOUNTY'}
           : {
-              'quest_type': 'EXPLORE',
+              'quest_type': 'BOUNTY',
               'latitude': latitude,
               'longitude': longitude,
               'radius_km': 25,
@@ -658,11 +728,17 @@ class QuestRepository {
     String questId,
     String checkpointId,
     String verificationCode,
-    String accessToken,
-  ) async {
+    String accessToken, {
+    double? latitude,
+    double? longitude,
+  }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/quests/$questId/checkpoints/$checkpointId/complete',
-      data: {'verification_code': verificationCode},
+      data: {
+        'verification_code': verificationCode,
+        'latitude': latitude,
+        'longitude': longitude,
+      },
       options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
     );
     return response.data!;
@@ -1902,7 +1978,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     if (nearbyPosition != null) {
       setState(() {
         nearbyPosition = null;
-        selectedFilter = 3;
+        selectedFilter = 0;
       });
       return;
     }
@@ -1912,7 +1988,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       if (mounted) {
         setState(() {
           nearbyPosition = position;
-          selectedFilter = 3;
+          selectedFilter = 0;
         });
       }
     } on Object {
@@ -1920,7 +1996,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Allow location access to find Explore quests within 25 km.',
+              'Allow location access to see bounties within 25 km.',
             ),
           ),
         );
@@ -1953,7 +2029,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         session?.user.email?.split('@').first ??
         'Explorer';
     final firstName = displayName.trim().split(RegExp(r'\s+')).first;
-    final filterTypes = [null, 'FRIENDS', 'BOUNTY', 'EXPLORE'];
+    const filterLabels = ['All', 'Hunts', 'Recognition', 'Ending soon'];
 
     return Scaffold(
       body: SafeArea(
@@ -1981,6 +2057,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       ),
                     ),
                     const Spacer(),
+                    IconButton(
+                      tooltip: 'Map',
+                      onPressed: () => context.push('/map'),
+                      icon: const Icon(Icons.map_outlined),
+                    ),
                     Badge.count(
                       count: unreadNotifications,
                       isLabelVisible: unreadNotifications > 0,
@@ -2022,17 +2103,17 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                     Text(
                       session == null
                           ? 'Browse freely as a guest'
-                          : 'Good morning, $firstName ✌️',
+                          : 'Hi, $firstName',
                       style: const TextStyle(color: muted, fontSize: 13),
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Find your next\nsmall adventure.',
+                      'BOUNTIES\nNEAR YOU.',
                       style: TextStyle(
-                        fontSize: 31,
-                        height: 1.08,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -1.4,
+                        fontSize: 46,
+                        height: 0.86,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -2.6,
                       ),
                     ),
                   ],
@@ -2079,7 +2160,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                         ),
                       );
                     }
-                    final labels = ['All', 'Friends', 'Bounties', 'Explore'];
+                    const labels = filterLabels;
                     final selected = selectedFilter == index;
                     return ChoiceChip(
                       selected: selected,
@@ -2106,12 +2187,17 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               sliver: SliverToBoxAdapter(
                 child: asyncQuests.when(
                   data: (quests) {
-                    final type = filterTypes[selectedFilter];
-                    final filtered = type == null
-                        ? quests
-                        : quests
-                              .where((quest) => quest.questType == type)
-                              .toList(growable: false);
+                    final open = quests
+                        .where((quest) => quest.status == 'OPEN')
+                        .toList();
+                    final filtered = switch (selectedFilter) {
+                      1 => open.where((quest) => quest.isHunt).toList(),
+                      2 => open.where((quest) => !quest.rewardEnabled).toList(),
+                      3 => (open..sort(
+                        (a, b) => a.deadline.compareTo(b.deadline),
+                      )),
+                      _ => open,
+                    };
                     return _QuestFeed(quests: filtered);
                   },
                   loading: () => const _QuestFeedLoading(),
@@ -2140,44 +2226,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: 0,
-        indicatorColor: accent,
-        onDestinationSelected: (index) {
-          if (index == 0) return;
-          if (index == 3) {
-            context.push(session == null ? '/auth?next=/profile' : '/profile');
-            return;
-          }
-          if (index == 1) {
-            context.push(
-              session == null ? '/auth?next=/my-quests' : '/my-quests',
-            );
-            return;
-          }
-          context.push(session == null ? '/auth?next=/create' : '/create');
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.explore_outlined),
-            selectedIcon: Icon(Icons.explore),
-            label: 'Discover',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.emoji_events_outlined),
-            label: 'Quests',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.add_circle_outline),
-            selectedIcon: Icon(Icons.add_circle),
-            label: 'Create',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            label: 'Profile',
-          ),
-        ],
-      ),
+      bottomNavigationBar: const SideQuestTabBar(current: AppTab.discover),
     );
   }
 }
@@ -2556,7 +2605,7 @@ class _QuestDetail extends ConsumerWidget {
 
   Future<void> shareQuest(BuildContext context) async {
     final box = context.findRenderObject() as RenderBox?;
-    final questUrl = Uri.parse(webBaseUrl).resolve('/quests/${quest.id}');
+    final questUrl = quest.shareUrl;
     try {
       await SharePlus.instance.share(
         ShareParams(
@@ -3024,6 +3073,10 @@ class _QuestCheckpointSectionState
       message = null;
     });
     try {
+      // Geofenced stops check the scan location on the server; it is never shown to others.
+      final position = checkpoint.hasGeofence
+          ? await currentDevicePosition(accuracy: LocationAccuracy.high)
+          : null;
       final result = await ref
           .read(questRepositoryProvider)
           .completeCheckpoint(
@@ -3031,6 +3084,8 @@ class _QuestCheckpointSectionState
             checkpoint.id,
             code,
             session.accessToken,
+            latitude: position?.latitude,
+            longitude: position?.longitude,
           );
       codeController.clear();
       ref.invalidate(questCheckpointsProvider(widget.quest.id));
@@ -3049,6 +3104,17 @@ class _QuestCheckpointSectionState
               ? data['message'] as String? ?? 'This code could not be verified.'
               : 'This code could not be verified.';
         });
+      }
+    } on PermissionDeniedException {
+      if (mounted) {
+        setState(
+          () => message =
+              'Allow location access so SideQuest can confirm you are at this stop.',
+        );
+      }
+    } on LocationServiceDisabledException {
+      if (mounted) {
+        setState(() => message = 'Turn on location services to scan this stop.');
       }
     } finally {
       if (mounted) setState(() => working = false);
@@ -5679,7 +5745,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   final locationController = TextEditingController();
   final groupInstructionsController = TextEditingController();
   int step = 0;
-  String questType = 'FRIENDS';
+  String questType = 'BOUNTY';
   String visibility = 'PUBLIC';
   DateTime deadline = DateTime.now().add(const Duration(days: 7));
   bool isGroup = false;
@@ -5695,7 +5761,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
   Position? questPosition;
   bool locatingQuest = false;
   bool sponsoredByBusiness = false;
-  final checkpointDrafts = <_CheckpointDraft>[_CheckpointDraft()];
+  final checkpointDrafts = <_CheckpointDraft>[_CheckpointDraft(), _CheckpointDraft()];
   final savedCheckpointIds = <String>[];
   bool draftLoadStarted = false;
   bool loadingDraft = false;
@@ -5814,7 +5880,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           (!proofRequirements.contains('LOCATION') || locationReady) &&
           (!proofRequirements.contains('QR_CHECKPOINT') || checkpointsReady),
     2 =>
-      selectionMethod == 'FIRST_VALID' ||
+      selectionMethod != 'BEST_SUBMISSION' ||
           criteriaController.text.trim().length >= 3,
     _ => true,
   };
@@ -5825,7 +5891,8 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
           (storedLatitude != null && storedLongitude != null));
 
   bool get checkpointsReady =>
-      checkpointDrafts.isNotEmpty &&
+      checkpointDrafts.length >= 2 &&
+      checkpointDrafts.length <= 8 &&
       checkpointDrafts.every(
         (checkpoint) =>
             checkpoint.title.text.trim().length >= 2 &&
@@ -5948,17 +6015,16 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'description': descriptionController.text.trim(),
         'organization_id': sponsoredByBusiness ? organization?.id : null,
         'cover_media_url': coverMediaUrl,
-        'location_name': questType == 'EXPLORE' && locationReady
-            ? locationController.text.trim()
-            : null,
-        'latitude': questType == 'EXPLORE' && locationReady
+        'location_name': locationReady ? locationController.text.trim() : null,
+        'latitude': locationReady
             ? questPosition?.latitude ?? storedLatitude
             : null,
-        'longitude': questType == 'EXPLORE' && locationReady
+        'longitude': locationReady
             ? questPosition?.longitude ?? storedLongitude
             : null,
         'quest_type': questType,
-        'visibility': visibility,
+        'visibility': questType == 'FRIENDS' ? 'INVITE_ONLY' : visibility,
+        'audience': questType == 'FRIENDS' ? 'ALL_FRIENDS' : null,
         'is_group_challenge': isGroup,
         'required_group_size': isGroup ? groupSize : null,
         'group_instructions': isGroup
@@ -5971,12 +6037,16 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         'judging_criteria': selectionMethod == 'BEST_SUBMISSION'
             ? criteriaController.text.trim()
             : null,
-        'reward_enabled': rewardEnabled,
-        'reward_amount_minor': rewardEnabled
+        'reward_enabled': questType == 'BOUNTY' && rewardEnabled,
+        'reward_amount_minor': questType == 'BOUNTY' && rewardEnabled
             ? (rewardAmount! * 100000).round()
             : null,
-        'reward_currency': rewardEnabled ? 'NIM' : null,
-        'settlement_asset': rewardEnabled ? 'NIM' : null,
+        'reward_currency': questType == 'BOUNTY' && rewardEnabled
+            ? 'NIM'
+            : null,
+        'settlement_asset': questType == 'BOUNTY' && rewardEnabled
+            ? 'NIM'
+            : null,
         'deadline': deadline.toUtc().toIso8601String(),
       };
       final created = widget.draftId == null
@@ -6300,23 +6370,36 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         onTap: chooseDeadline,
       ),
       const SizedBox(height: 20),
-      const Text('Quest type', style: TextStyle(fontWeight: FontWeight.w700)),
+      const Text('Who is it for?', style: TextStyle(fontWeight: FontWeight.w700)),
       const SizedBox(height: 10),
       SegmentedButton<String>(
         segments: const [
-          ButtonSegment(value: 'FRIENDS', label: Text('Friends')),
           ButtonSegment(value: 'BOUNTY', label: Text('Bounty')),
-          ButtonSegment(value: 'EXPLORE', label: Text('Explore')),
+          ButtonSegment(value: 'FRIENDS', label: Text('Friends challenge')),
         ],
         selected: {questType},
         onSelectionChanged: (value) => setState(() {
           questType = value.first;
-          if (questType != 'EXPLORE') {
-            proofRequirements.remove('LOCATION');
+          if (questType == 'FRIENDS') {
+            // Friends challenges are private, moneyless and won by a room vote.
+            visibility = 'INVITE_ONLY';
+            rewardEnabled = false;
+            sponsoredByBusiness = false;
+            selectionMethod = 'ROOM_VOTE';
+          } else {
+            visibility = 'PUBLIC';
+            if (selectionMethod == 'ROOM_VOTE') selectionMethod = 'FIRST_VALID';
           }
         }),
       ),
-      if (organization?.verificationStatus == 'VERIFIED') ...[
+      const SizedBox(height: 8),
+      Text(
+        questType == 'FRIENDS'
+            ? 'Sent to your friends. Never shown on Discover. The room votes the winner.'
+            : 'Public or private by link. Up to $maxOfficialEntries entries, NIM or recognition.',
+        style: const TextStyle(color: muted, fontSize: 13),
+      ),
+      if (organization != null && questType == 'BOUNTY') ...[
         const SizedBox(height: 16),
         SwitchListTile.adaptive(
           value: sponsoredByBusiness,
@@ -6327,11 +6410,11 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           subtitle: const Text(
-            'Show the verified business identity on this quest.',
+            'Show your Organization badge on this bounty.',
           ),
         ),
       ],
-      if (questType == 'EXPLORE') ...[
+      ...[
         const SizedBox(height: 18),
         Container(
           padding: const EdgeInsets.all(16),
@@ -6459,7 +6542,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       'VIDEO': 'Video',
       'LINK': 'Link',
       'TEXT': 'Text',
-      'QR_CHECKPOINT': 'QR checkpoint',
+      'QR_CHECKPOINT': 'Hunt (QR stops)',
       'LOCATION': 'Location',
     };
     return Column(
@@ -6533,11 +6616,11 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
         ),
         const SizedBox(height: 10),
         SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 3, label: Text('3')),
-            ButtonSegment(value: 5, label: Text('5')),
-            ButtonSegment(value: 10, label: Text('10')),
+          segments: [
+            for (var count = 1; count <= maxOfficialEntries; count++)
+              ButtonSegment(value: count, label: Text('$count')),
           ],
+          showSelectedIcon: false,
           selected: {maxEntries},
           onSelectionChanged: (value) => setState(() {
             maxEntries = value.first;
@@ -6566,7 +6649,6 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
                       proofRequirements.remove(entry.key);
                     } else {
                       proofRequirements.add(entry.key);
-                      if (entry.key == 'LOCATION') questType = 'EXPLORE';
                     }
                   }),
                 );
@@ -6681,17 +6763,17 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             const SizedBox(height: 10),
           ],
           OutlinedButton.icon(
-            onPressed: checkpointDrafts.length >= 20
+            onPressed: checkpointDrafts.length >= 8
                 ? null
                 : () =>
                       setState(() => checkpointDrafts.add(_CheckpointDraft())),
             icon: const Icon(Icons.add_rounded),
-            label: const Text('Add checkpoint'),
+            label: const Text('Add stop'),
           ),
           if (!checkpointsReady) ...[
             const SizedBox(height: 8),
             const Text(
-              'Give every checkpoint a title of at least two characters.',
+              'A hunt needs 2 to 8 stops, each with a name of at least two characters.',
               style: TextStyle(color: Color(0xFF8F2E1E), fontSize: 12),
             ),
           ],
@@ -6710,19 +6792,30 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             'Publish the method now so every participant knows the rules.',
       ),
       const SizedBox(height: 22),
+      if (questType == 'FRIENDS') ...[
+        _SelectionCard(
+          selected: selectionMethod == 'ROOM_VOTE',
+          title: 'Room vote',
+          subtitle:
+              'One vote each, never for yourself. 24 hours after the deadline. Ties share the win.',
+          onTap: () => setState(() => selectionMethod = 'ROOM_VOTE'),
+        ),
+        const SizedBox(height: 10),
+      ],
       _SelectionCard(
         selected: selectionMethod == 'FIRST_VALID',
-        title: 'First valid',
+        title: questType == 'FRIENDS' ? 'Race: first valid wins' : 'First valid',
         subtitle: 'The earliest qualifying entries win.',
         onTap: () => setState(() => selectionMethod = 'FIRST_VALID'),
       ),
       const SizedBox(height: 10),
-      _SelectionCard(
-        selected: selectionMethod == 'BEST_SUBMISSION',
-        title: 'Best submission',
-        subtitle: 'Review valid entries against published criteria.',
-        onTap: () => setState(() => selectionMethod = 'BEST_SUBMISSION'),
-      ),
+      if (questType == 'BOUNTY')
+        _SelectionCard(
+          selected: selectionMethod == 'BEST_SUBMISSION',
+          title: 'Best submission',
+          subtitle: 'Review valid entries against published criteria.',
+          onTap: () => setState(() => selectionMethod = 'BEST_SUBMISSION'),
+        ),
       if (selectionMethod == 'BEST_SUBMISSION') ...[
         const SizedBox(height: 14),
         TextField(
@@ -6753,6 +6846,12 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
             setState(() => winnerCount = value.first),
       ),
       const SizedBox(height: 24),
+      if (questType == 'FRIENDS')
+        const Text(
+          'No money between friends. Play for bragging rights and badges.',
+          style: TextStyle(color: muted),
+        ),
+      if (questType == 'BOUNTY')
       SwitchListTile.adaptive(
         value: rewardEnabled,
         onChanged: (value) => setState(() => rewardEnabled = value),
@@ -6790,7 +6889,7 @@ class _CreateQuestScreenState extends ConsumerState<CreateQuestScreen> {
       ('Type', questType.toLowerCase()),
       if (sponsoredByBusiness && organization != null)
         ('Sponsor', organization.displayName),
-      if (questType == 'EXPLORE')
+      if (locationReady)
         (
           'Location',
           locationReady ? locationController.text.trim() : 'Not set',
@@ -7215,34 +7314,7 @@ class _MyQuestsScreenState extends ConsumerState<MyQuestsScreen> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: 1,
-        indicatorColor: accent,
-        onDestinationSelected: (index) {
-          if (index == 0) context.go('/discover');
-          if (index == 2) context.push('/create');
-          if (index == 3) context.push('/profile');
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.explore_outlined),
-            label: 'Discover',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.emoji_events_outlined),
-            selectedIcon: Icon(Icons.emoji_events),
-            label: 'Quests',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.add_circle_outline),
-            label: 'Create',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            label: 'Profile',
-          ),
-        ],
-      ),
+      bottomNavigationBar: const SideQuestTabBar(current: AppTab.quests),
     );
   }
 }

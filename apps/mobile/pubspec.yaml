@@ -46,6 +46,9 @@ dependencies:
   geolocator: ^14.1.1
   mobile_scanner: ^7.4.2
   qr_flutter: ^4.1.0
+  # Apple Maps: native MapKit on iOS, MapKit JS in a web view on Android.
+  apple_maps_flutter: ^1.4.0
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
