@@ -13,7 +13,7 @@ export default function Icon() {
       <div
         style={{
           alignItems: "center",
-          background: "#171917",
+          background: "#111111",
           color: "#ffffff",
           display: "flex",
           fontFamily: "Arial, sans-serif",
@@ -29,7 +29,7 @@ export default function Icon() {
         <span>SQ</span>
         <span
           style={{
-            background: "#c7ff00",
+            background: "#e0fe5e",
             borderRadius: 999,
             bottom: 102,
             height: 30,
