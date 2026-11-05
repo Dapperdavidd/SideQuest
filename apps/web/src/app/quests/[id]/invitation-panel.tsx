@@ -76,18 +76,18 @@ export function InvitationPanel({ questId }: { questId: string }) {
   return (
     <section className="mt-5 border-t border-line pt-5">
       <div className="flex items-center gap-2"><Link2 size={17} /><h3 className="font-bold">Private invitations</h3></div>
-      <p className="mt-2 text-xs leading-5 text-muted">Each accepted link grants access and joins that person to this quest. Links expire after seven days or at the quest deadline.</p>
+      <p className="mt-2 text-xs leading-5 text-ink-2">Each accepted link grants access and joins that person to this quest. Links expire after seven days or at the quest deadline.</p>
       <div className="mt-4 flex gap-2">
         <label className="flex flex-1 items-center gap-2 rounded-xl border border-line px-3 text-xs font-bold">Uses<input aria-label="Maximum invitation uses" type="number" min={1} max={10} value={maxUses} onChange={(event) => setMaxUses(Math.min(10, Math.max(1, Number(event.target.value) || 1)))} className="min-w-0 flex-1 bg-transparent py-3 text-right outline-none" /></label>
-        <button onClick={createInvitation} disabled={working} className="flex items-center gap-2 rounded-xl bg-dark px-4 text-xs font-bold text-white disabled:opacity-50">{working ? <LoaderCircle size={15} className="animate-spin" /> : <Link2 size={15} />}Create link</button>
+        <button onClick={createInvitation} disabled={working} className="flex items-center gap-2 rounded-xl bg-inv px-4 text-xs font-bold text-on-inv disabled:opacity-50">{working ? <LoaderCircle size={15} className="animate-spin" /> : <Link2 size={15} />}Create link</button>
       </div>
       <div className="mt-3 space-y-2">
         {invitations.map((invitation) => {
           const inactive = Boolean(invitation.revoked_at) || new Date(invitation.expires_at) <= new Date() || invitation.use_count >= invitation.max_uses;
-          return <div key={invitation.id} className="rounded-xl bg-background p-3"><div className="flex items-center justify-between gap-3"><span className="text-xs font-bold">{invitation.use_count}/{invitation.max_uses} accepted</span><span className="text-[0.65rem] text-muted">{inactive ? "Inactive" : `Expires ${new Date(invitation.expires_at).toLocaleDateString()}`}</span></div>{!inactive ? <div className="mt-2 flex gap-2"><button onClick={() => copy(invitation)} className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-white py-2 text-xs font-bold">{copied === invitation.id ? <Check size={14} /> : <Copy size={14} />}{copied === invitation.id ? "Copied" : "Copy link"}</button><button aria-label="Revoke invitation" onClick={() => revoke(invitation)} disabled={working} className="grid h-8 w-8 place-items-center rounded-lg border border-[#f2c7bf] bg-[#fff7f5] text-[#8f2e1e]"><X size={14} /></button></div> : null}</div>;
+          return <div key={invitation.id} className="rounded-xl bg-sunken p-3"><div className="flex items-center justify-between gap-3"><span className="text-xs font-bold">{invitation.use_count}/{invitation.max_uses} accepted</span><span className="text-[0.65rem] text-ink-2">{inactive ? "Inactive" : `Expires ${new Date(invitation.expires_at).toLocaleDateString()}`}</span></div>{!inactive ? <div className="mt-2 flex gap-2"><button onClick={() => copy(invitation)} className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-surface py-2 text-xs font-bold">{copied === invitation.id ? <Check size={14} /> : <Copy size={14} />}{copied === invitation.id ? "Copied" : "Copy link"}</button><button aria-label="Revoke invitation" onClick={() => revoke(invitation)} disabled={working} className="grid h-8 w-8 place-items-center rounded-lg border border-danger/30 bg-coral-tint text-danger"><X size={14} /></button></div> : null}</div>;
         })}
       </div>
-      {error ? <p role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-xs text-[#8f2e1e]">{error}</p> : null}
+      {error ? <p role="alert" className="mt-3 rounded-xl bg-coral-tint p-3 text-xs text-danger">{error}</p> : null}
     </section>
   );
 }

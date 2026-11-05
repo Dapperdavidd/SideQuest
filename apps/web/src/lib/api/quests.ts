@@ -14,14 +14,14 @@ export type Quest = {
   latitude: number | null;
   longitude: number | null;
   distance_km: number | null;
-  quest_type: "FRIENDS" | "BOUNTY" | "EXPLORE";
+  quest_type: "FRIENDS" | "BOUNTY";
   visibility: "PUBLIC" | "PRIVATE" | "INVITE_ONLY";
   is_group_challenge: boolean;
   required_group_size: number | null;
   group_instructions: string | null;
   max_entries: number;
   winner_count: number;
-  winner_selection_method: "FIRST_VALID" | "BEST_SUBMISSION";
+  winner_selection_method: "FIRST_VALID" | "BEST_SUBMISSION" | "ROOM_VOTE";
   proof_requirements: string[];
   judging_criteria: string | null;
   reward_enabled: boolean;
@@ -35,6 +35,12 @@ export type Quest = {
   created_at: string;
   published_at: string | null;
   viewer_joined: boolean;
+  /** Number of hunt stops. A quest with 2 or more stops is a scavenger hunt. */
+  checkpoint_count: number;
+  short_code: string | null;
+  hunt_ordered: boolean;
+  /** Friends challenges only: a text stake such as "Loser buys suya". Never money. */
+  friendly_stake: string | null;
 };
 
 export type QuestInvitation = {
@@ -112,6 +118,9 @@ export type QuestCheckpoint = {
   instructions: string | null;
   verification_code: string | null;
   completed_at: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  radius_m: number;
 };
 
 export type CheckpointCompletion = {
@@ -151,7 +160,7 @@ export type PublicWinner = {
 export type MyQuestSummary = {
   id: string;
   title: string;
-  quest_type: "FRIENDS" | "BOUNTY" | "EXPLORE";
+  quest_type: "FRIENDS" | "BOUNTY";
   status: string;
   relationship: "CREATOR" | "PARTICIPANT" | "SAVED";
   deadline: string;
@@ -235,6 +244,11 @@ export type PublicProfile = {
   created_quests_count: number;
   completed_quests_count: number;
   wins_count: number;
+  friends_count: number;
+  groups_count: number;
+  profile_visibility: "PUBLIC" | "PRIVATE";
+  challenge_permission: "FRIENDS" | "NOBODY";
+  group_invite_permission: "FRIENDS" | "NOBODY";
 };
 
 export function apiUrl(path: string) {
@@ -245,7 +259,7 @@ export function apiUrl(path: string) {
 
 const API_REQUEST_TIMEOUT_MS = 5_000;
 
-function apiFetch(url: string, init: RequestInit = {}) {
+export function apiFetch(url: string, init: RequestInit = {}) {
   return fetch(url, {
     ...init,
     signal: init.signal ?? AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
@@ -269,6 +283,15 @@ export async function listQuests(filters: { search?: string; questType?: Quest["
   if (!response.ok) throw new Error("Unable to load quests right now.");
   return response.json() as Promise<Quest[]>;
 }
+
+export async function resolveShortCode(code: string): Promise<{ quest_id: string; short_code: string; quest_type: Quest["quest_type"]; creator_display_name: string } | null> {
+  const response = await apiFetch(apiUrl(`/q/${encodeURIComponent(code)}`), { cache: "no-store" });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("Unable to open this link right now.");
+  return response.json() as Promise<{ quest_id: string; short_code: string; quest_type: Quest["quest_type"]; creator_display_name: string }>;
+}
+
+export const isHunt = (quest: Pick<Quest, "checkpoint_count">) => quest.checkpoint_count >= 2;
 
 export async function getQuest(id: string, accessToken?: string): Promise<Quest | null> {
   const response = await apiFetch(apiUrl(`/quests/${encodeURIComponent(id)}`), {
@@ -470,8 +493,39 @@ export function formatDeadline(deadline: string) {
   return `${days} days left`;
 }
 
-export function questImageClass(type: Quest["quest_type"]) {
-  if (type === "BOUNTY") return "photo-coffee";
-  if (type === "FRIENDS") return "photo-campus";
-  return "photo-sunset";
+const fallbackCovers = [
+  "/art/cover-lekki-sunset.svg",
+  "/art/cover-ire-market.svg",
+  "/art/cover-cafe-neo-video.svg",
+  "/art/cover-yaba-murals.svg",
+  "/art/cover-campus-hunt.svg",
+  "/art/cover-tarkwa-sunrise.svg",
+] as const;
+
+const friendsCovers = ["/art/cover-four-kitchens.svg", "/art/cover-recreate-2015.svg", "/art/cover-celebrity-race.svg"] as const;
+
+/** Cover art for a quest: the creator's upload, or stable poster art chosen from the quest id. */
+export function questCover(quest: Pick<Quest, "id" | "cover_media_url" | "quest_type">) {
+  if (quest.cover_media_url) return quest.cover_media_url;
+  const hash = [...quest.id].reduce((total, character) => (total * 31 + character.charCodeAt(0)) >>> 0, 7);
+  const pool = quest.quest_type === "FRIENDS" ? friendsCovers : fallbackCovers;
+  return pool[hash % pool.length];
+}
+
+/** Compact countdown in the design's style, for example "2D 4H" or "45M". */
+export function formatCountdown(deadline: string) {
+  const milliseconds = new Date(deadline).getTime() - Date.now();
+  if (milliseconds <= 0) return "Closed";
+  const minutes = Math.floor(milliseconds / 60_000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days > 0) return `${days}D ${hours}H`;
+  if (hours > 0) return `${hours}H ${minutes % 60}M`;
+  return `${Math.max(1, minutes)}M`;
+}
+
+/** Reward amount without the "just for fun" wording, or null when the quest pays recognition only. */
+export function rewardAmount(quest: Pick<Quest, "reward_enabled" | "reward_amount_minor">) {
+  if (!quest.reward_enabled || quest.reward_amount_minor === null) return null;
+  return `${new Intl.NumberFormat("en", { maximumFractionDigits: 5 }).format(quest.reward_amount_minor / 100_000)} NIM`;
 }

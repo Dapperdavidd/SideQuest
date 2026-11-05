@@ -73,14 +73,14 @@ export function PayoutDestinationForm() {
     }
   }
 
-  if (loading) return <p className="mt-5 flex items-center gap-2 text-sm text-white/45"><LoaderCircle size={16} className="animate-spin" />Loading destination…</p>;
+  if (loading) return <p className="mt-5 flex items-center gap-2 text-sm text-ink-2"><LoaderCircle size={16} className="animate-spin" />Loading destination…</p>;
 
   return (
     <div className="mt-5">
-      <label className="text-xs font-bold uppercase tracking-[0.14em] text-white/40">Testnet address<input value={address} onChange={(event) => setAddress(event.target.value)} autoCapitalize="characters" autoCorrect="off" spellCheck={false} placeholder="NQ00 0000 0000 0000 0000 0000 0000 0000 0000" className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-sm font-normal tracking-wide text-white outline-none placeholder:text-white/20 focus:border-accent" /></label>
-      {savedAddress === address && savedAddress ? <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-accent"><Check size={16} />Saved for TestAlbatross rewards</p> : null}
+      <label className="text-xs font-bold uppercase tracking-[0.14em] text-ink-2">Testnet address<input value={address} onChange={(event) => setAddress(event.target.value)} autoCapitalize="characters" autoCorrect="off" spellCheck={false} placeholder="NQ00 0000 0000 0000 0000 0000 0000 0000 0000" className="mt-2 w-full rounded-xl border border-line bg-sunken px-4 py-3 font-mono text-sm font-normal tracking-wide text-ink outline-none placeholder:text-ink-2 focus:border-inv" /></label>
+      {savedAddress === address && savedAddress ? <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink"><Check size={16} />Saved for TestAlbatross rewards</p> : null}
       {error ? <p role="alert" className="mt-3 rounded-xl bg-[#3c1f1a] p-3 text-sm leading-6 text-[#ffc0b5]">{error}</p> : null}
-      <button onClick={save} disabled={saving || !address.trim() || address === savedAddress} className="mt-4 flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-dark disabled:cursor-not-allowed disabled:opacity-40">{saving ? <LoaderCircle size={16} className="animate-spin" /> : null}{saving ? "Validating…" : "Save payout address"}</button>
+      <button onClick={save} disabled={saving || !address.trim() || address === savedAddress} className="mt-4 flex items-center gap-2 rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink disabled:cursor-not-allowed disabled:opacity-40">{saving ? <LoaderCircle size={16} className="animate-spin" /> : null}{saving ? "Validating…" : "Save payout address"}</button>
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { ReviewWorkspace } from "./review-workspace";
 type ReviewPageProps = { params: Promise<{ id: string }> };
 
 export default function ReviewPage(props: ReviewPageProps) {
-  return <Suspense fallback={<main className="min-h-screen animate-pulse bg-background" />}><ReviewExperience {...props} /></Suspense>;
+  return <Suspense fallback={<main className="min-h-screen animate-pulse bg-sunken" />}><ReviewExperience {...props} /></Suspense>;
 }
 
 async function ReviewExperience({ params }: ReviewPageProps) {
@@ -35,5 +35,5 @@ async function ReviewExperience({ params }: ReviewPageProps) {
     if (data?.signedUrl) signedUrls[path] = data.signedUrl;
   }));
 
-  return <main className="min-h-screen bg-background text-foreground"><header className="flex items-center justify-between border-b border-line bg-white px-5 py-4 sm:px-8"><Logo /><Link href={`/quests/${quest.id}`} className="flex items-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-bold"><ArrowLeft size={16} /> Quest</Link></header><div className="mx-auto max-w-4xl px-5 py-8 sm:px-8 sm:py-10"><ReviewWorkspace quest={quest} initialEntries={entries} initialSignedUrls={signedUrls} /></div></main>;
+  return <main className="min-h-screen bg-sunken text-foreground"><header className="flex items-center justify-between border-b border-line bg-surface px-5 py-4 sm:px-8"><Logo /><Link href={`/quests/${quest.id}`} className="flex items-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-bold"><ArrowLeft size={16} /> Quest</Link></header><div className="mx-auto max-w-4xl px-5 py-8 sm:px-8 sm:py-10"><ReviewWorkspace quest={quest} initialEntries={entries} initialSignedUrls={signedUrls} /></div></main>;
 }

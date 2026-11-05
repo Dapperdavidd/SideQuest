@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NotificationList } from "./notification-list";
 
 export default function NotificationsPage() {
-  return <Suspense fallback={<main className="min-h-screen animate-pulse bg-background" />}><NotificationsExperience /></Suspense>;
+  return <Suspense fallback={<main className="min-h-screen animate-pulse bg-sunken" />}><NotificationsExperience /></Suspense>;
 }
 
 async function NotificationsExperience() {
@@ -17,5 +17,5 @@ async function NotificationsExperience() {
   const notifications = await getNotifications(session.access_token);
   const viewer = await getViewer();
 
-  return <AppShell active="notifications" viewer={viewer ? { displayName: viewer.displayName, avatarUrl: viewer.avatarUrl } : null} unreadNotifications={notifications.filter((item) => !item.read_at).length}><div className="px-4 py-7 sm:px-7 lg:px-9 lg:py-9"><div className="mx-auto max-w-4xl"><p className="app-eyebrow">Stay in the loop</p><h1 className="mt-2 font-display text-4xl font-extrabold tracking-[-0.05em]">Inbox</h1><p className="mt-2 text-sm text-muted">Quest invites, reactions, wins, and the things that need you.</p><NotificationList initialNotifications={notifications} /></div></div></AppShell>;
+  return <AppShell active="notifications" viewer={viewer ? { displayName: viewer.displayName, avatarUrl: viewer.avatarUrl, username: viewer.username } : null} unreadNotifications={notifications.filter((item) => !item.read_at).length}><div className="px-4 py-7 sm:px-7 lg:px-9 lg:py-9"><div className="mx-auto max-w-4xl"><p className="sq-label text-ink-2">Stay in the loop</p><h1 className="sq-display mt-3 text-[clamp(48px,6vw,88px)]">Inbox</h1><p className="mt-2 text-sm text-ink-2">Quest invites, reactions, wins, and the things that need you.</p><NotificationList initialNotifications={notifications} /></div></div></AppShell>;
 }

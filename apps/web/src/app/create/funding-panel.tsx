@@ -125,16 +125,16 @@ export function FundingPanel({ questId }: { questId: string }) {
   }
 
   return (
-    <div className="mt-5 rounded-[1.25rem] border border-[#cde66c] bg-accent-soft p-5">
+    <div className="mt-5 rounded-[1.25rem] border border-[#cde66c] bg-lime-tint p-5">
       <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent"><ShieldCheck size={20} /></span>
-        <div><h2 className="font-display text-lg font-bold">Fund the verified reward pool</h2><p className="mt-1 text-sm leading-6 text-muted">Nimiq Pay will show the exact Testnet recipient and amount before you approve. SideQuest opens the quest only after independent confirmation.</p></div>
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-lime"><ShieldCheck size={20} /></span>
+        <div><h2 className="font-display text-lg font-black uppercase">Fund the verified reward pool</h2><p className="mt-1 text-sm leading-6 text-ink-2">Nimiq Pay will show the exact Testnet recipient and amount before you approve. SideQuest opens the quest only after independent confirmation.</p></div>
       </div>
-      {intent ? <div className="mt-4 grid grid-cols-2 gap-2 text-sm"><div className="rounded-xl bg-white/75 p-3"><span className="block text-xs text-muted">Total</span><strong>{intent.amount_nim} NIM</strong></div><div className="rounded-xl bg-white/75 p-3"><span className="block text-xs text-muted">Status</span><strong>{intent.status.replaceAll("_", " ")}</strong></div></div> : null}
+      {intent ? <div className="mt-4 grid grid-cols-2 gap-2 text-sm"><div className="rounded-xl bg-on-inv/75 p-3"><span className="block text-xs text-ink-2">Total</span><strong>{intent.amount_nim} NIM</strong></div><div className="rounded-xl bg-on-inv/75 p-3"><span className="block text-xs text-ink-2">Status</span><strong>{intent.status.replaceAll("_", " ")}</strong></div></div> : null}
       {verification && !verification.quest_opened ? <p className="mt-4 flex items-center gap-2 text-sm font-semibold"><LoaderCircle size={16} className="animate-spin" />Transaction {verification.transaction.state}; {verification.transaction.confirmations}/{intent?.minimum_confirmations ?? 2} confirmations.</p> : null}
       {verification?.quest_opened ? <p className="mt-4 flex items-center gap-2 text-sm font-bold"><Check size={17} />Funding confirmed. Opening your quest…</p> : null}
-      {error ? <p role="alert" className="mt-4 rounded-xl bg-white p-3 text-sm leading-6 text-[#8f2e1e]">{error}</p> : null}
-      <div className="mt-4 flex flex-wrap gap-2"><button onClick={fund} disabled={working || Boolean(submittedHash) || intent?.status === "PENDING" || intent?.status === "CONFIRMED"} className="flex items-center gap-2 rounded-full bg-dark px-5 py-3 text-sm font-bold text-white disabled:opacity-40">{working ? <LoaderCircle size={17} className="animate-spin" /> : <WalletCards size={17} />}{working ? "Opening Nimiq Pay…" : "Fund with Nimiq Pay"}</button>{submittedHash && intent?.status === "CREATED" ? <button onClick={() => verifyHash(intent.id, submittedHash)} disabled={working} className="rounded-full border border-dark/20 px-5 py-3 text-sm font-bold disabled:opacity-40">Retry verification</button> : null}{intent?.status === "PENDING" ? <button onClick={() => refresh()} className="rounded-full border border-dark/20 px-5 py-3 text-sm font-bold">Check confirmation</button> : null}</div>
+      {error ? <p role="alert" className="mt-4 rounded-xl bg-surface p-3 text-sm leading-6 text-danger">{error}</p> : null}
+      <div className="mt-4 flex flex-wrap gap-2"><button onClick={fund} disabled={working || Boolean(submittedHash) || intent?.status === "PENDING" || intent?.status === "CONFIRMED"} className="flex items-center gap-2 rounded-full bg-inv px-5 py-3 text-sm font-bold text-on-inv disabled:opacity-40">{working ? <LoaderCircle size={17} className="animate-spin" /> : <WalletCards size={17} />}{working ? "Opening Nimiq Pay…" : "Fund with Nimiq Pay"}</button>{submittedHash && intent?.status === "CREATED" ? <button onClick={() => verifyHash(intent.id, submittedHash)} disabled={working} className="rounded-full border border-inv/20 px-5 py-3 text-sm font-bold disabled:opacity-40">Retry verification</button> : null}{intent?.status === "PENDING" ? <button onClick={() => refresh()} className="rounded-full border border-inv/20 px-5 py-3 text-sm font-bold">Check confirmation</button> : null}</div>
     </div>
   );
 }

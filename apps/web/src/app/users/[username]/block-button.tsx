@@ -34,5 +34,5 @@ export function BlockButton({ userId, username, initialBlocked }: { userId: stri
     }
   }
 
-  return <div><button onClick={toggle} disabled={working} className="flex items-center gap-2 text-xs font-semibold text-muted hover:text-foreground disabled:opacity-50">{working ? <LoaderCircle className="animate-spin" size={14} /> : blocked ? <UserRoundCheck size={14} /> : <Ban size={14} />}{blocked ? "Unblock profile" : "Block profile"}</button>{error ? <p role="alert" className="mt-2 text-xs text-[#ffb4a6]">{error}</p> : null}</div>;
+  return <div><button onClick={toggle} disabled={working} className="flex items-center gap-2 text-xs font-semibold text-ink-2 hover:text-foreground disabled:opacity-50">{working ? <LoaderCircle className="animate-spin" size={14} /> : blocked ? <UserRoundCheck size={14} /> : <Ban size={14} />}{blocked ? "Unblock profile" : "Block profile"}</button>{error ? <p role="alert" className="mt-2 text-xs text-[#ffb4a6]">{error}</p> : null}</div>;
 }

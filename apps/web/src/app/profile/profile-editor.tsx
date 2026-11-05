@@ -78,29 +78,29 @@ export function ProfileEditor({ profile }: { profile: EditableProfile }) {
 
   if (!editing) {
     return (
-      <button type="button" onClick={() => setEditing(true)} className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-bold text-white/75 hover:border-accent hover:text-accent">
+      <button type="button" onClick={() => setEditing(true)} className="mt-5 inline-flex items-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink-2 hover:border-ink hover:text-ink">
         <Pencil size={15} /> Edit profile
       </button>
     );
   }
 
   return (
-    <div className="mt-7 max-w-xl rounded-2xl border border-white/10 bg-black/20 p-5">
-      <h2 className="font-display text-lg font-bold">Profile settings</h2>
-      <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-white/45">Display name
-        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} autoComplete="name" className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-accent" />
+    <div className="mt-7 max-w-xl rounded-2xl border border-line bg-sunken p-5">
+      <h2 className="font-display text-lg font-black uppercase">Profile settings</h2>
+      <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-ink-2">Display name
+        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} autoComplete="name" className="mt-2 w-full rounded-xl border border-line bg-sunken px-4 py-3 text-sm font-normal normal-case tracking-normal text-ink outline-none focus:border-inv" />
       </label>
-      <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-white/45">Username
-        <span className="mt-2 flex items-center rounded-xl border border-white/10 bg-black/20 px-4 focus-within:border-accent"><span className="text-sm text-white/35">@</span><input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} minLength={3} maxLength={30} autoCapitalize="none" autoCorrect="off" spellCheck={false} className="min-w-0 flex-1 bg-transparent py-3 text-sm font-normal normal-case tracking-normal text-white outline-none" /></span>
+      <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-ink-2">Username
+        <span className="mt-2 flex items-center rounded-xl border border-line bg-sunken px-4 focus-within:border-inv"><span className="text-sm text-ink-2">@</span><input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} minLength={3} maxLength={30} autoCapitalize="none" autoCorrect="off" spellCheck={false} className="min-w-0 flex-1 bg-transparent py-3 text-sm font-normal normal-case tracking-normal text-ink outline-none" /></span>
       </label>
-      <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-white/45">Bio
-        <textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={240} rows={4} className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-accent" />
-        <span className="mt-1 block text-right text-[0.68rem] font-normal normal-case tracking-normal text-white/35">{[...bio].length}/240</span>
+      <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-ink-2">Bio
+        <textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={240} rows={4} className="mt-2 w-full resize-none rounded-xl border border-line bg-sunken px-4 py-3 text-sm font-normal normal-case tracking-normal text-ink outline-none focus:border-inv" />
+        <span className="mt-1 block text-right text-[0.68rem] font-normal normal-case tracking-normal text-ink-2">{[...bio].length}/240</span>
       </label>
       {error ? <p role="alert" className="mt-4 rounded-xl bg-[#4a211b] p-3 text-sm leading-5 text-[#ffb8aa]">{error}</p> : null}
       <div className="mt-5 flex flex-wrap gap-3">
-        <button type="button" onClick={save} disabled={saving} className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-3 text-sm font-bold text-dark disabled:opacity-50">{saving ? <LoaderCircle size={16} className="animate-spin" /> : <Check size={16} />}{saving ? "Saving…" : "Save profile"}</button>
-        <button type="button" onClick={cancel} disabled={saving} className="inline-flex items-center gap-2 rounded-full border border-white/15 px-5 py-3 text-sm font-bold text-white/70 disabled:opacity-50"><X size={16} />Cancel</button>
+        <button type="button" onClick={save} disabled={saving} className="inline-flex items-center gap-2 rounded-full bg-lime px-5 py-3 text-sm font-bold text-ink disabled:opacity-50">{saving ? <LoaderCircle size={16} className="animate-spin" /> : <Check size={16} />}{saving ? "Saving…" : "Save profile"}</button>
+        <button type="button" onClick={cancel} disabled={saving} className="inline-flex items-center gap-2 rounded-full border border-line px-5 py-3 text-sm font-bold text-ink-2 disabled:opacity-50"><X size={16} />Cancel</button>
       </div>
     </div>
   );

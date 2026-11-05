@@ -25,7 +25,7 @@ async function AdminContent() {
     else throw error;
   }
   if (accessDenied) {
-    return <AdminShell><div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8"><ShieldCheck size={30} className="text-accent" /><h1 className="mt-5 font-display text-3xl font-bold">Administrator access required</h1><p className="mt-3 max-w-xl leading-7 text-white/55">This operations area is protected by the server’s administrator allowlist. No moderation data was exposed.</p></div></AdminShell>;
+    return <AdminShell><div className="rounded-3xl border border-on-inv/10 bg-on-inv/5 p-8"><ShieldCheck size={30} className="text-accent" /><h1 className="mt-5 font-display text-3xl font-black uppercase">Administrator access required</h1><p className="mt-3 max-w-xl leading-7 text-on-inv/55">This operations area is protected by the server’s administrator allowlist. No moderation data was exposed.</p></div></AdminShell>;
   }
   if (!queue) throw new Error("The operations queue could not be loaded.");
   return <AdminShell><OperationsConsole initialReports={[...queue.reviewingReports, ...queue.openReports]} initialOrganizations={queue.organizations} initialFailedPayouts={queue.failedPayouts} initialSuspendedQuests={queue.suspendedQuests} initialSuspendedUsers={queue.suspendedUsers} accessToken={session.access_token} /></AdminShell>;
@@ -44,9 +44,9 @@ async function loadAdminQueue(accessToken: string) {
 }
 
 function AdminShell({ children }: { children: React.ReactNode }) {
-  return <main className="min-h-screen bg-[#101310] p-3 text-white sm:p-5"><div className="mx-auto min-h-[calc(100vh-2.5rem)] max-w-6xl rounded-[1.5rem] border border-white/10 bg-[#151815]"><header className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-8"><Link href="/profile" className="flex items-center gap-2 text-sm text-white/60 hover:text-white"><ArrowLeft size={17} />Profile</Link><Logo inverse /><span className="text-xs font-bold uppercase tracking-[0.16em] text-accent">Operations</span></header><div className="px-5 py-8 sm:px-8 sm:py-10">{children}</div></div></main>;
+  return <main className="min-h-screen bg-bg p-3 text-on-inv sm:p-5"><div className="mx-auto min-h-[calc(100vh-2.5rem)] max-w-6xl rounded-[1.5rem] border border-on-inv/10 bg-inv"><header className="flex items-center justify-between border-b border-on-inv/10 px-5 py-4 sm:px-8"><Link href="/profile" className="flex items-center gap-2 text-sm text-on-inv/60 hover:text-on-inv"><ArrowLeft size={17} />Profile</Link><Logo inverse /><span className="text-xs font-bold uppercase tracking-[0.16em] text-accent">Operations</span></header><div className="px-5 py-8 sm:px-8 sm:py-10">{children}</div></div></main>;
 }
 
 function AdminLoading() {
-  return <main className="min-h-screen animate-pulse bg-[#101310] p-5"><div className="mx-auto min-h-[calc(100vh-2.5rem)] max-w-6xl rounded-[1.5rem] bg-[#151815]" /></main>;
+  return <main className="min-h-screen animate-pulse bg-bg p-5"><div className="mx-auto min-h-[calc(100vh-2.5rem)] max-w-6xl rounded-[1.5rem] bg-inv" /></main>;
 }

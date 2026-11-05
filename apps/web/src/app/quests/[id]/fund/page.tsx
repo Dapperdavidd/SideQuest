@@ -13,7 +13,7 @@ type FundingPageProps = {
 };
 
 export default function FundingPage(props: FundingPageProps) {
-  return <Suspense fallback={<main className="min-h-screen animate-pulse bg-background" />}><FundingExperience {...props} /></Suspense>;
+  return <Suspense fallback={<main className="min-h-screen animate-pulse bg-sunken" />}><FundingExperience {...props} /></Suspense>;
 }
 
 async function FundingExperience({ params }: FundingPageProps) {
@@ -31,8 +31,8 @@ async function FundingExperience({ params }: FundingPageProps) {
   if (quest.status !== "AWAITING_FUNDING") redirect(`/quests/${id}`);
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-line bg-white">
+    <main className="min-h-screen bg-sunken text-foreground">
+      <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4 sm:px-8">
           <Logo />
           <Link href="/quests" className="flex items-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-bold"><ArrowLeft size={16} /> My quests</Link>
@@ -40,16 +40,16 @@ async function FundingExperience({ params }: FundingPageProps) {
       </header>
       <div className="mx-auto grid max-w-5xl gap-7 px-5 py-8 lg:grid-cols-[minmax(0,1fr)_280px] sm:px-8 sm:py-12">
         <section>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Reward escrow</p>
-          <h1 className="mt-3 font-display text-4xl font-bold tracking-tight">Fund {quest.title}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">Your quest is saved but remains private until its full reward pool is confirmed on Nimiq Testnet.</p>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-ink-2">Reward escrow</p>
+          <h1 className="mt-3 font-display text-4xl font-black uppercase tracking-tight">Fund {quest.title}</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-ink-2">Your quest is saved but remains private until its full reward pool is confirmed on Nimiq Testnet.</p>
           <FundingPanel questId={id} />
         </section>
         <aside className="order-first lg:order-last">
-          <div className="rounded-[1.5rem] bg-dark p-6 text-white">
-            <span className="grid h-11 w-11 place-items-center rounded-full bg-accent text-dark"><ShieldCheck size={21} /></span>
-            <h2 className="mt-5 font-display text-xl font-bold">Verified before opening</h2>
-            <p className="mt-3 text-sm leading-6 text-white/60">SideQuest verifies the recipient, exact luna amount, payment reference, and confirmations independently before publishing the quest.</p>
+          <div className="rounded-[1.5rem] bg-inv p-6 text-on-inv">
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-lime text-on-lime"><ShieldCheck size={21} /></span>
+            <h2 className="mt-5 font-display text-xl font-black uppercase">Verified before opening</h2>
+            <p className="mt-3 text-sm leading-6 text-on-inv/60">SideQuest verifies the recipient, exact luna amount, payment reference, and confirmations independently before publishing the quest.</p>
           </div>
         </aside>
       </div>

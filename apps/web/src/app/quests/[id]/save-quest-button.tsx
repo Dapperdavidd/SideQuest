@@ -35,5 +35,5 @@ export function SaveQuestButton({ questId, initialSaved }: { questId: string; in
     }
   }
 
-  return <div className="mt-3"><button onClick={toggle} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl border border-line px-5 py-3 text-sm font-bold disabled:opacity-50">{loading ? <LoaderCircle size={17} className="animate-spin" /> : saved ? <Check size={17} /> : <Bookmark size={17} />}{loading ? "Saving…" : saved ? "Saved" : "Save quest"}</button>{error ? <p role="alert" className="mt-2 text-center text-xs text-[#8f2e1e]">{error}</p> : null}</div>;
+  return <div className="flex-1"><button type="button" onClick={toggle} disabled={loading} aria-pressed={saved} className="flex h-[50px] w-full items-center justify-center gap-2 rounded-full border-2 border-on-lime text-xs font-extrabold uppercase tracking-[0.16em] text-on-lime disabled:opacity-50">{loading ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : saved ? <Check size={17} aria-hidden="true" /> : <Bookmark size={17} aria-hidden="true" />}{loading ? "Saving…" : saved ? "Saved" : "Save"}</button>{error ? <p role="alert" className="mt-2 text-center text-xs">{error}</p> : null}</div>;
 }

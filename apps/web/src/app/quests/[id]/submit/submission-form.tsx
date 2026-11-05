@@ -128,18 +128,18 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
 
   if (submitted) {
     return (
-      <div className="rounded-[1.5rem] border border-line bg-white p-8 text-center shadow-[0_20px_60px_rgba(23,25,23,0.07)]"><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-accent-soft"><Check size={30} /></span><h1 className="mt-5 font-display text-3xl font-bold">Entry submitted</h1><p className="mx-auto mt-3 max-w-md leading-7 text-muted">Your official timestamp is locked in. We&apos;ll notify you when the creator reviews the entry.</p><div className="mt-7 flex flex-wrap justify-center gap-3"><Link href={`/quests/${quest.id}`} className="rounded-full bg-accent px-6 py-3 font-bold text-dark">View quest</Link><Link href="/discover" className="rounded-full border border-line px-6 py-3 font-bold">Explore more quests</Link></div></div>
+      <div className="rounded-[26px] border border-line bg-surface p-8 text-center shadow-[var(--shadow-card)]"><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-lime-tint"><Check size={30} /></span><h1 className="mt-5 font-display text-3xl font-black uppercase">Entry submitted</h1><p className="mx-auto mt-3 max-w-md leading-7 text-ink-2">Your official timestamp is locked in. We&apos;ll notify you when the creator reviews the entry.</p><div className="mt-7 flex flex-wrap justify-center gap-3"><Link href={`/quests/${quest.id}`} className="rounded-full bg-lime px-6 py-3 font-bold text-ink">View quest</Link><Link href="/discover" className="rounded-full border border-line px-6 py-3 font-bold">Explore more quests</Link></div></div>
     );
   }
 
   return (
-    <form onSubmit={submit} className="rounded-[1.5rem] border border-line bg-white p-5 shadow-[0_20px_60px_rgba(23,25,23,0.07)] sm:p-8">
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">Official entry</p>
-      <h1 className="mt-3 font-display text-3xl font-bold">Submit your proof</h1>
-      <p className="mt-2 text-sm leading-6 text-muted">Once accepted, this consumes one of {quest.max_entries} entry slots and cannot be deleted.</p>
-      <p className="mt-2 text-xs leading-5 text-muted">Caption and written proof are saved on this device. Media must be selected again after a refresh.</p>
+    <form onSubmit={submit} className="rounded-[26px] border border-line bg-surface p-5 shadow-[var(--shadow-card)] sm:p-8">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink-2">Official entry</p>
+      <h1 className="mt-3 font-display text-3xl font-black uppercase">Submit your proof</h1>
+      <p className="mt-2 text-sm leading-6 text-ink-2">Once accepted, this consumes one of {quest.max_entries} entry slots and cannot be deleted.</p>
+      <p className="mt-2 text-xs leading-5 text-ink-2">Caption and written proof are saved on this device. Media must be selected again after a refresh.</p>
 
-      {quest.proof_requirements.includes("QR_CHECKPOINT") ? <div className="mt-6 flex items-start gap-3 rounded-xl bg-accent-soft p-4"><Check size={18} className="mt-0.5 shrink-0" /><p className="text-sm leading-6"><strong>Checkpoint progress is verified automatically.</strong><br /><span className="text-muted">Complete every stop on the quest page before sending this entry.</span></p></div> : null}
+      {quest.proof_requirements.includes("QR_CHECKPOINT") ? <div className="mt-6 flex items-start gap-3 rounded-xl bg-lime-tint p-4"><Check size={18} className="mt-0.5 shrink-0" /><p className="text-sm leading-6"><strong>Checkpoint progress is verified automatically.</strong><br /><span className="text-ink-2">Complete every stop on the quest page before sending this entry.</span></p></div> : null}
 
       <div className={manualProofRequirements.length ? "mt-7 space-y-5" : ""}>
         {manualProofRequirements.map((proofType) => (
@@ -147,10 +147,10 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
         ))}
       </div>
 
-      <label className="mt-6 block text-sm font-bold">Caption <span className="font-normal text-muted">(optional)</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} maxLength={280} rows={3} className="mt-2 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Tell the creator a little about your entry…" /><span className="mt-1 block text-right text-xs font-normal text-muted">{caption.length}/280</span></label>
+      <label className="mt-6 block text-sm font-bold">Caption <span className="font-normal text-ink-2">(optional)</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} maxLength={280} rows={3} className="mt-2 w-full resize-none rounded-xl border border-line bg-sunken px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Tell the creator a little about your entry…" /><span className="mt-1 block text-right text-xs font-normal text-ink-2">{caption.length}/280</span></label>
 
-      {error ? <p role="alert" className="mt-5 rounded-xl bg-[#fff0ed] p-4 text-sm leading-6 text-[#8f2e1e]">{error}</p> : null}
-      <button disabled={submitting} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-6 py-4 font-bold text-dark disabled:opacity-50">{submitting ? <LoaderCircle size={18} className="animate-spin" /> : <FileUp size={18} />}{submitting ? "Securing your entry…" : "Submit official entry"}</button>
+      {error ? <p role="alert" className="mt-5 rounded-xl bg-coral-tint p-4 text-sm leading-6 text-danger">{error}</p> : null}
+      <button disabled={submitting} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-lime px-6 py-4 font-bold text-ink disabled:opacity-50">{submitting ? <LoaderCircle size={18} className="animate-spin" /> : <FileUp size={18} />}{submitting ? "Securing your entry…" : "Submit official entry"}</button>
     </form>
   );
 }
@@ -158,11 +158,11 @@ export function SubmissionForm({ quest }: SubmissionFormProps) {
 function ProofField({ proofType, value, onValue, onFile }: { proofType: string; value: string; onValue: (value: string) => void; onFile: (file: File | null) => void }) {
   const label = proofLabel(proofType);
   if (mediaProofs.has(proofType)) {
-    return <label className="block text-sm font-bold">{label}<span className="mt-2 block rounded-xl border border-dashed border-muted/50 bg-background p-5 text-center"><FileUp size={22} className="mx-auto text-muted" /><span className="mt-2 block text-sm font-normal text-muted">Choose {proofType === "PHOTO" ? "a JPG, PNG, or WebP image" : "an MP4, MOV, or WebM video"}</span><input required type="file" accept={proofType === "PHOTO" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm"} onChange={(event) => onFile(event.target.files?.[0] ?? null)} className="mt-3 block w-full text-xs font-normal text-muted file:mr-3 file:rounded-full file:border-0 file:bg-dark file:px-4 file:py-2 file:font-bold file:text-white" /></span></label>;
+    return <label className="block text-sm font-bold">{label}<span className="mt-2 block rounded-xl border border-dashed border-muted/50 bg-sunken p-5 text-center"><FileUp size={22} className="mx-auto text-ink-2" /><span className="mt-2 block text-sm font-normal text-ink-2">Choose {proofType === "PHOTO" ? "a JPG, PNG, or WebP image" : "an MP4, MOV, or WebM video"}</span><input required type="file" accept={proofType === "PHOTO" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm"} onChange={(event) => onFile(event.target.files?.[0] ?? null)} className="mt-3 block w-full text-xs font-normal text-ink-2 file:mr-3 file:rounded-full file:border-0 file:bg-inv file:px-4 file:py-2 file:font-bold file:text-on-inv" /></span></label>;
   }
 
   const textarea = proofType === "TEXT";
-  return <label className="block text-sm font-bold">{label}{textarea ? <textarea required value={value} onChange={(event) => onValue(event.target.value)} rows={4} maxLength={2048} className="mt-2 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Write the requested proof…" /> : <input required value={value} onChange={(event) => onValue(event.target.value)} type={proofType === "LINK" ? "url" : "text"} maxLength={2048} className="mt-2 w-full rounded-xl border border-line bg-background px-4 py-3 font-normal outline-none focus:border-foreground" placeholder={proofPlaceholder(proofType)} />}</label>;
+  return <label className="block text-sm font-bold">{label}{textarea ? <textarea required value={value} onChange={(event) => onValue(event.target.value)} rows={4} maxLength={2048} className="mt-2 w-full resize-none rounded-xl border border-line bg-sunken px-4 py-3 font-normal outline-none focus:border-foreground" placeholder="Write the requested proof…" /> : <input required value={value} onChange={(event) => onValue(event.target.value)} type={proofType === "LINK" ? "url" : "text"} maxLength={2048} className="mt-2 w-full rounded-xl border border-line bg-sunken px-4 py-3 font-normal outline-none focus:border-foreground" placeholder={proofPlaceholder(proofType)} />}</label>;
 }
 
 function proofLabel(proofType: string) {

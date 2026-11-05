@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiUrl, readApiError } from "@/lib/api/quests";
@@ -29,7 +29,6 @@ export function JoinButton({ questId, isCreator, isOpen, initialJoined = false }
         router.push(`/auth?next=${encodeURIComponent(`/quests/${questId}`)}`);
         return;
       }
-
       const response = await fetch(apiUrl(`/quests/${questId}/join`), {
         method: "POST",
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -44,18 +43,26 @@ export function JoinButton({ questId, isCreator, isOpen, initialJoined = false }
     }
   }
 
-  const disabled = loading || joined || isCreator || !isOpen;
-  const label = joined ? "Quest joined" : isCreator ? "You created this quest" : !isOpen ? "Quest is closed" : "Join this quest";
+  if (joined && isOpen && !isCreator) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Link href={`/quests/${questId}/submit`} className="sq-btn sq-btn-inv h-[58px] w-full">Submit your entry<ArrowRight size={18} strokeWidth={2.4} aria-hidden="true" /></Link>
+        <span className="flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em]"><Check size={14} aria-hidden="true" />You joined this quest</span>
+      </div>
+    );
+  }
+
+  const disabled = loading || isCreator || !isOpen;
+  const label = isCreator ? "You created this quest" : !isOpen ? "Quest is closed" : "Join quest";
 
   return (
-    <div>
-      <button onClick={join} disabled={disabled} className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-6 py-4 font-bold text-dark disabled:cursor-not-allowed disabled:opacity-55">
-        {loading ? <LoaderCircle size={18} className="animate-spin" /> : joined ? <Check size={18} /> : null}
+    <div className="flex flex-col gap-2">
+      <button type="button" onClick={join} disabled={disabled} className="sq-btn sq-btn-inv h-[58px] w-full">
+        {loading ? <LoaderCircle size={18} className="animate-spin" aria-hidden="true" /> : null}
         {loading ? "Joining…" : label}
+        {!loading && !disabled ? <ArrowRight size={18} strokeWidth={2.4} aria-hidden="true" /> : null}
       </button>
-      {error ? <p role="alert" className="mt-3 rounded-xl bg-[#fff0ed] px-4 py-3 text-sm text-[#8f2e1e]">{error}</p> : null}
-      {!isCreator && isOpen ? <Link href={`/quests/${questId}/submit`} className="mt-3 block text-center text-sm font-bold underline decoration-accent decoration-2 underline-offset-4">Already joined? Submit your entry</Link> : null}
-      <p className="mt-3 text-center text-xs text-muted">Joining records your interest. Only an accepted submission uses an entry slot.</p>
+      {error ? <p role="alert" className="rounded-2xl bg-surface px-4 py-3 text-sm text-danger">{error}</p> : null}
     </div>
   );
 }
