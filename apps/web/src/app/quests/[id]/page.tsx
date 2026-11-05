@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { ArrowLeft, ArrowRight, BadgeCheck, Map as MapIcon, Share2, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Avatar } from "@/components/avatar";
+import { AppleMap } from "@/components/map/apple-map";
 import { QrCode } from "@/components/qr-code";
 import { ReportContentButton } from "@/components/report-content-button";
 import { formatCountdown, getQuest, getQuestCheckpoints, getQuestSaved, getQuestWinners, isHunt, questCover, rewardAmount, type Quest } from "@/lib/api/quests";
@@ -149,10 +150,18 @@ async function QuestExperience({ params }: QuestPageProps) {
           {hunt ? (
             <section aria-labelledby="route-h" className="flex flex-col gap-5">
               <Heading index="01" id="route-h" title="The route" meta={`${quest.checkpoint_count} stops · ${quest.proof_requirements.includes("QR_CHECKPOINT") ? "QR at each stop" : "visit each stop"}`} />
-              <div className="sq-map relative h-[300px] overflow-hidden rounded-[28px]">
-                {checkpoints.map((checkpoint, index) => (
-                  <span key={checkpoint.id} role="img" aria-label={`Stop ${checkpoint.position}, ${checkpoint.title}`} className={`absolute grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[14px] border-[3px] border-surface font-display text-lg font-black shadow-[0_6px_14px_rgba(17,17,17,0.22)] ${checkpoint.completed_at ? "bg-lime text-on-lime" : "bg-inv text-on-inv"}`} style={{ left: `${14 + (70 * index) / Math.max(1, checkpoints.length - 1)}%`, top: `${[66, 38, 30, 55, 44, 62, 34, 50][index % 8]}%`, rotate: `${[-8, 6, -5, 4, -6, 7, -3, 5][index % 8]}deg` }}>{checkpoint.position}</span>
-                ))}
+              <div className="relative h-[300px] overflow-hidden rounded-[28px]">
+                <AppleMap
+                  className="absolute inset-0"
+                  pins={checkpoints.filter((checkpoint) => checkpoint.latitude !== null && checkpoint.longitude !== null).map((checkpoint) => ({ id: checkpoint.id, title: `Stop ${checkpoint.position}: ${checkpoint.title}`, subtitle: `${checkpoint.radius_m} m zone`, latitude: checkpoint.latitude!, longitude: checkpoint.longitude!, glyph: String(checkpoint.position), kind: "stop" as const }))}
+                  fallback={
+                    <div className="sq-map absolute inset-0">
+                      {checkpoints.map((checkpoint, index) => (
+                        <span key={checkpoint.id} role="img" aria-label={`Stop ${checkpoint.position}, ${checkpoint.title}`} className={`absolute grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[14px] border-[3px] border-surface font-display text-lg font-black shadow-[0_6px_14px_rgba(17,17,17,0.22)] ${checkpoint.completed_at ? "bg-lime text-on-lime" : "bg-inv text-on-inv"}`} style={{ left: `${14 + (70 * index) / Math.max(1, checkpoints.length - 1)}%`, top: `${[66, 38, 30, 55, 44, 62, 34, 50][index % 8]}%`, rotate: `${[-8, 6, -5, 4, -6, 7, -3, 5][index % 8]}deg` }}>{checkpoint.position}</span>
+                      ))}
+                    </div>
+                  }
+                />
                 <Link href="/map" className="sq-btn sq-btn-inv absolute bottom-[18px] right-[18px] !min-h-[46px] !px-[18px] !text-xs"><MapIcon size={16} aria-hidden="true" />Open map</Link>
               </div>
               <ol className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3.5">
