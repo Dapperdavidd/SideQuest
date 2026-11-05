@@ -14,7 +14,7 @@ Clients never decide whether an entry slot remains, whether a deadline has passe
 
 ## Quest invariants
 
-- `max_entries` is 1–10.
+- `max_entries` is 1–7 (v5). Quests published under the old 1–10 limit keep their immutable rules.
 - `winner_count` is 1–3 and cannot exceed `max_entries`.
 - A participant has one accepted official entry per quest.
 - Joining and saving do not reserve an entry slot.
@@ -41,3 +41,12 @@ No wallet connection is required for browsing, authentication, free quests, or o
 ## Authentication
 
 Supabase Auth is shared across web and Flutter. Email and Google can be completed after a Supabase project and Google OAuth client are configured. Apple UI and callback boundaries can be implemented in code, but final activation requires Apple Developer identifiers and a signing key supplied by the account owner.
+
+## v5 social model
+
+- Bounties are public (or private by link) and appear on Discover, Map and Quest Radar. Friends challenges never appear on Discover; they reach a friend group, all accepted friends, or people holding an invite link.
+- Friendships are mutual (request and accept). Groups hold 2 to 50 members and are joined with an invite code (`/g/:code`).
+- Friends challenges carry no money. An optional `friendly_stake` is plain text. Winners are picked by room vote (`ROOM_VOTE`) or by first valid entry for races.
+- Room votes: one vote per member, never for your own entry, a 24 hour window after the deadline, tallies hidden until close, ties share the win, and fewer than 2 entries or 2 votes ends as no contest. The deadline worker also runs the vote-close sweep and finalizes the quest.
+- Every quest has a short share code (6 characters, base32 without 0, 1, I, L, O). `GET /api/v1/q/:code` resolves it and records an anonymous open. The web serves `/q/:code`, `apple-app-site-association` and `assetlinks.json` (configured through `APPLE_TEAM_ID`, `IOS_BUNDLE_ID`, `ANDROID_PACKAGE`, `ANDROID_CERT_SHA256`).
+- Hunts are 2 to 8 ordered or free-order stops. A stop with coordinates counts only when the scan happens inside its geofence (default 75 m); the location is checked by the API and never shared with other players.
